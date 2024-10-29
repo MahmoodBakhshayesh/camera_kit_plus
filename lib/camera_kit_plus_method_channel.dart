@@ -35,4 +35,12 @@ class MethodChannelCameraKitPlus extends CameraKitPlusPlatform {
     });
     return version ?? false;
   }
+
+  @override
+  Future<bool> switchCamera(CameraKitPlusCameraMode mode) async {
+    final version = await methodChannel.invokeMethod<bool>('switchCamera', {
+      "cameraID":mode.index
+    });
+    return version ?? false;
+  }
 }

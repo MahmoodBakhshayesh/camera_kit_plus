@@ -19,4 +19,8 @@ class CameraKitPlus {
   Future<bool> changeFlashMode(CameraKitPlusFlashMode mode) {
     return CameraKitPlusPlatform.instance.changeFlashMode(mode);
   }
+
+  Future<bool> switchCamera(CameraKitPlusCameraMode mode) {
+    return CameraKitPlusPlatform.instance.switchCamera(mode);
+  }
 }

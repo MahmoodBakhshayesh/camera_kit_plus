@@ -13,17 +13,19 @@ import AVFoundation
 class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputObjectsDelegate {
     private var _view: UIView
 //    private var captureSession: AVCaptureSession?
-    let captureSession = AVCaptureSession()
+    var captureSession = AVCaptureSession()
     var captureDevice : AVCaptureDevice!
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var channel: FlutterMethodChannel?
     var initCameraFinished:Bool! = false
+    var cameraID = 0
 
     
     init(frame: CGRect, messenger: FlutterBinaryMessenger) {
         _view = UIView(frame: frame)
         _view.backgroundColor = UIColor.blue
         super.init()
+        setupAVCapture()
         setupCamera()
         channel = FlutterMethodChannel(name: "camera_kit_plus", binaryMessenger: messenger)
         channel?.setMethodCallHandler(handle)
@@ -56,6 +58,12 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
         case "changeFlashMode":
             let flashModeID = (myArgs?["flashModeID"] as! Int);
             self.changeFlashMode(modeID: flashModeID, result: result)
+//            self.setFlashMode(flashMode: flashModeID)
+//            self.changeFlashMode()
+            break
+        case "switchCamera":
+            let cameraID = (myArgs?["cameraID"] as! Int);
+            self.switchCamera(cameraID: cameraID, result: result)
 //            self.setFlashMode(flashMode: flashModeID)
 //            self.changeFlashMode()
             break
@@ -109,13 +117,26 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
     
     func setupAVCapture(){
         captureSession.sessionPreset = AVCaptureSession.Preset.high
-        guard let device = AVCaptureDevice
-            .default(AVCaptureDevice.DeviceType.builtInWideAngleCamera,for: .video,position: .back) else {
-            return
+        self.captureDevice = AVCaptureDevice
+            .default(AVCaptureDevice.DeviceType.builtInWideAngleCamera,for: .video,position: .back)
+    }
+    
+    func switchCamera(cameraID: Int,result:  @escaping FlutterResult){
+        print("switch camera to \(cameraID)")
+        if(cameraID == 0){
+            self.captureSession.stopRunning()
+            self.captureSession = AVCaptureSession()
+            self.captureDevice = AVCaptureDevice.default(AVCaptureDevice.DeviceType.builtInWideAngleCamera,for: .video,position: .back)
+            setupCamera()
+            
+        }else{
+            self.captureSession.stopRunning()
+            self.captureSession = AVCaptureSession()
+            self.captureDevice = AVCaptureDevice.default(AVCaptureDevice.DeviceType.builtInWideAngleCamera,for: .video,position: .front)
+            setupCamera()
         }
-        
-        
-
+        self.cameraID = cameraID
+        result(true)
     }
     
     func startSession(isFirst: Bool) {
@@ -142,8 +163,8 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
         print("setupCamera")
         
         // Set the video capture device to the default camera
-        self.captureDevice = AVCaptureDevice.default(for: .video)
-        setFlashMode(mode: .off)
+//        self.captureDevice = AVCaptureDevice.default(AVCaptureDevice.DeviceType.builtInWideAngleCamera,for: .video,position: .front)
+//        setFlashMode(mode: .off)
         
         let videoInput: AVCaptureDeviceInput
         do {
@@ -186,8 +207,9 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
     }
     
     func setFlashMode(mode: AVCaptureDevice.TorchMode){
+        
         do{
-            if (captureDevice.hasFlash)
+            if (captureDevice.hasFlash && self.cameraID == 0)
             {
                 try captureDevice.lockForConfiguration()
                 captureDevice.torchMode = mode

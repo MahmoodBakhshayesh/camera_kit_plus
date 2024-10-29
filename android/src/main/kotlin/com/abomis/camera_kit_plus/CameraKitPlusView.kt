@@ -45,6 +45,7 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
     private lateinit var barcodeScanner: BarcodeScanner
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
+    private var cameraSelector: CameraSelector? = null
 
     private var preview: Preview? = null
     val REQUEST_CAMERA_PERMISSION = 1001
@@ -81,12 +82,17 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
         displaySize.y = screenHeight
         linearLayout.layoutParams = LayoutParams(displaySize.x, displaySize.y)
         linearLayout.addView(previewView)
+        setupCameraSelector()
         setupCamera()
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
         previewView.layout(0, 0, right - left, bottom - top)
+    }
+
+    private  fun setupCameraSelector(){
+        cameraSelector =  CameraSelector.DEFAULT_BACK_CAMERA
     }
 
 
@@ -121,7 +127,7 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
                     }
 
             // Select the back camera as default
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+//            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
             // Unbind all use cases before rebinding
             cameraProvider?.unbindAll()
@@ -130,7 +136,7 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
             try {
                 camera = cameraProvider?.bindToLifecycle(
                         lifecycleOwner,
-                        cameraSelector,
+                        cameraSelector!!,
                         preview,
                         imageAnalysis
                 )
@@ -202,6 +208,11 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
                 changeFlashMode(flashModeID,result)
             }
 
+            "switchCamera" -> {
+                val cameraID = call.argument<Int>("cameraID")!!
+                switchCamera(cameraID,result)
+            }
+
 //            "changeCameraVisibility" -> {
 //                val visibility = java.lang.Boolean.TRUE == call.argument("visibility")
 //                changeCameraVisibility(visibility)
@@ -221,6 +232,18 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
 
             "dispose" -> dispose()
             else -> result.notImplemented()
+        }
+    }
+
+    private fun switchCamera(cameraID: Int, result: MethodChannel.Result) {
+        if(cameraID == 0){
+            cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+            setupCamera()
+
+        }else{
+            cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+            setupCamera()
+
         }
     }
 

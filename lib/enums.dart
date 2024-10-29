@@ -3,3 +3,8 @@ enum CameraKitPlusFlashMode {
   on,
   auto
 }
+
+enum CameraKitPlusCameraMode {
+  back,
+  front,
+}
