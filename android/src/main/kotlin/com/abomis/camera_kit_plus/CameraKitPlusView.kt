@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Point
+import android.os.Build
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.ViewGroup
@@ -11,9 +12,11 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.annotation.OptIn
 import androidx.camera.core.AspectRatio
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -40,6 +43,9 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
     private lateinit var linearLayout: FrameLayout
     private var cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private lateinit var barcodeScanner: BarcodeScanner
+    private var cameraProvider: ProcessCameraProvider? = null
+    private var camera: Camera? = null
+
     private var preview: Preview? = null
     val REQUEST_CAMERA_PERMISSION = 1001
 
@@ -52,7 +58,7 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
         previewView = getActivity(context)?.let { PreviewView(it) }!!
         previewView.layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         previewView.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-
+        methodChannel.setMethodCallHandler(this)
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(
                     getActivity(context)!!,
@@ -95,10 +101,10 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
 
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
+            cameraProvider = cameraProviderFuture.get()
 
             preview = Preview.Builder()
-                    .setTargetAspectRatio(AspectRatio.RATIO_16_9)  // Match aspect ratio of PreviewView
+                    .setTargetAspectRatio(AspectRatio.RATIO_16_9)
                     .build()
                     .also {
                         it.setSurfaceProvider(previewView.surfaceProvider)
@@ -106,6 +112,7 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
 
             val imageAnalysis = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+
                     .build()
                     .also {
                         it.setAnalyzer(cameraExecutor) { imageProxy ->
@@ -117,11 +124,11 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
             // Unbind all use cases before rebinding
-            cameraProvider.unbindAll()
+            cameraProvider?.unbindAll()
             preview = Preview.Builder().setTargetAspectRatio(AspectRatio.RATIO_16_9).setTargetRotation(previewView.rotation.toInt()).build()
             preview!!.setSurfaceProvider(previewView.surfaceProvider)
             try {
-                cameraProvider.bindToLifecycle(
+                camera = cameraProvider?.bindToLifecycle(
                         lifecycleOwner,
                         cameraSelector,
                         preview,
@@ -134,80 +141,6 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
     }
 
 
-//    private fun setupCamera2() {
-//        // Create a camera preview view
-//        previewView = androidx.camera.view.PreviewView(context).apply {
-////            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-//            layoutParams = LayoutParams(
-//                    LayoutParams.MATCH_PARENT,  // Make the PreviewView fill the width of the parent
-//                    LayoutParams.MATCH_PARENT   // Make the PreviewView fill the height of the parent
-//            )
-//            scaleType = PreviewView.ScaleType.FILL_CENTER  // Ensure preview fills the entire view
-//
-//        }
-//        previewView.setBackgroundColor(Color.YELLOW)
-//        addView(previewView)
-//        previewView.scaleType = PreviewView.ScaleType.FILL_CENTER  // This will ensure the preview fills the view
-//
-//        // Get the correct LifecycleOwner from the context
-//        val activity = getActivity(context)
-//        val lifecycleOwner = activity as LifecycleOwner
-//
-//        // Initialize barcode scanner with options
-//        val options = BarcodeScannerOptions.Builder()
-//                .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS) // Scan all types of barcodes
-//                .build()
-//        barcodeScanner = BarcodeScanning.getClient(options)
-//
-////         Bind camera and start preview
-//        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-//        cameraProviderFuture.addListener({
-//            val cameraProvider = cameraProviderFuture.get()
-//
-////            1440 -- 2400
-////            val resolution = Size(1440, 2400)
-////            val resolution = Size(1920, 1080)
-//            // Set up the preview use case
-//
-//            val preview = Preview.Builder()
-//                    .setTargetAspectRatio(AspectRatio.RATIO_16_9)  // Match aspect ratio of PreviewView
-//
-////                    .setTargetResolution(resolution)
-//                    .build()
-//                    .also {
-//                        it.setSurfaceProvider(previewView.surfaceProvider)
-//                    }
-//
-//            // Set up the analysis use case for barcode scanning
-//            val imageAnalysis = ImageAnalysis.Builder()
-//                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-////                    .setTargetResolution(resolution)  // Set resolution for preview
-//                    .build()
-//                    .also {
-//                        it.setAnalyzer(cameraExecutor, { imageProxy ->
-//                            processImageProxy(imageProxy)
-//                        })
-//                    }
-//
-//            // Select the back camera as default
-//            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-//
-//            // Unbind all use cases before rebinding
-//            cameraProvider.unbindAll()
-//
-//            try {
-//                // Bind use cases to camera
-//                cameraProvider.bindToLifecycle(
-//                        lifecycleOwner,
-//                        cameraSelector,
-//                        preview,
-//                        imageAnalysis
-//                )
-//            } catch (exc: Exception) {
-//                Log.e("CameraX", "Use case binding failed", exc)
-//            }
-//        }, ContextCompat.getMainExecutor(context))
-//    }
 
     private fun getActivity(context: Context): Activity? {
         var contextTemp = context
@@ -252,6 +185,69 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "getPlatformVersion" -> result.success("Android" + Build.VERSION.RELEASE)
+//            "getCameraPermission" -> getCameraPermission(result)
+//            "initCamera" -> {
+//                val initFlashModeID = call.argument<Int>("initFlashModeID")!!
+//                val fill = java.lang.Boolean.TRUE == call.argument("fill")
+//                val barcodeTypeID = call.argument<Int>("barcodeTypeID")!!
+//                val modeID = call.argument<Int>("modeID")!!
+//                val cameraID = call.argument<Int>("cameraTypeID")!!
+//                initCamera(initFlashModeID, fill, barcodeTypeID, cameraID, modeID)
+//            }
 
+            "changeFlashMode" -> {
+                val flashModeID = call.argument<Int>("flashModeID")!!
+                changeFlashMode(flashModeID,result)
+            }
+
+//            "changeCameraVisibility" -> {
+//                val visibility = java.lang.Boolean.TRUE == call.argument("visibility")
+//                changeCameraVisibility(visibility)
+//            }
+
+            "pauseCamera" -> pauseCamera(result)
+            "resumeCamera" -> resumeCamera(result)
+//            "takePicture" -> {
+//                val path = call.argument<String>("path")
+//                takePicture(path, result)
+//            }
+
+//            "processImageFromPath" -> {
+//                val imgPath = call.argument<String>("path")
+//                processImageFromPath(imgPath, result)
+//            }
+
+            "dispose" -> dispose()
+            else -> result.notImplemented()
+        }
+    }
+
+    private fun resumeCamera(result: MethodChannel.Result) {
+       setupCamera()
+    }
+
+    private fun pauseCamera(result: MethodChannel.Result) {
+        cameraProvider?.unbindAll()
+        if (barcodeScanner != null) {
+            barcodeScanner.close()
+//            barcodeScanner = null
+        }
+
+    }
+
+    private fun getFlashMode(flashModeID: Int): Int {
+        return when (flashModeID) {
+            1 -> ImageCapture.FLASH_MODE_ON
+            0 -> ImageCapture.FLASH_MODE_OFF
+            else -> ImageCapture.FLASH_MODE_AUTO
+        }
+    }
+
+    private fun changeFlashMode(flashModeID: Int, result: MethodChannel.Result) {
+        if (camera != null) {
+            camera!!.getCameraControl().enableTorch(flashModeID == 1)
+        }
     }
 }

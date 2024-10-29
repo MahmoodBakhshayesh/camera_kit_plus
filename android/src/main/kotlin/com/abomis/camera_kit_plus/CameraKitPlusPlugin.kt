@@ -15,10 +15,11 @@ class CameraKitPlusPlugin: FlutterPlugin, MethodCallHandler {
   private lateinit var channel : MethodChannel
 
   override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-    channel = MethodChannel(flutterPluginBinding.binaryMessenger, "camera_kit_plus")
+//    channel = MethodChannel(flutterPluginBinding.binaryMessenger, "camera_kit_plus")
+
     flutterPluginBinding.platformViewRegistry.registerViewFactory("camera-kit-plus-view", CameraKitPlusViewFactory(flutterPluginBinding.binaryMessenger))
 
-    channel.setMethodCallHandler(this)
+//    channel.setMethodCallHandler(this)
   }
 
 
