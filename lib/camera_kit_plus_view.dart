@@ -21,11 +21,7 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView> {
 
   @override
   void initState() {
-    // channel.setMethodCallHandler((call) async {
-    //   if (call.method == "onBarcodeScanned") {
-    //     widget.onBarcodeRead.call(call.arguments);
-    //   }
-    // });
+    // channel.setMethodCallHandler(_methodCallHandler);
     controller = widget.controller ?? CameraKitPlusController();
     super.initState();
   }
@@ -52,7 +48,7 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView> {
   }
 
   Future<dynamic> _methodCallHandler(MethodCall methodCall) async {
-    if (methodCall.method == "onBarcodeRead") {
+    if (methodCall.method == "onBarcodeScanned") {
       String barcode = methodCall.arguments.toString();
       widget.onBarcodeRead?.call(barcode);
     }

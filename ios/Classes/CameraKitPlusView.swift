@@ -143,7 +143,8 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
         
         // Set the video capture device to the default camera
         self.captureDevice = AVCaptureDevice.default(for: .video)
-        self.captureDevice.torchMode = .off
+        setFlashMode(mode: .off)
+        
         let videoInput: AVCaptureDeviceInput
         do {
             videoInput = try AVCaptureDeviceInput(device:  self.captureDevice)
@@ -184,21 +185,22 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
         result(true)
     }
     
-    func changeFlashMode(modeID: Int,result:  @escaping FlutterResult){
-            do{
-                if (captureDevice.hasFlash)
-                {
-                    try captureDevice.lockForConfiguration()
-                    captureDevice.torchMode = (modeID == 2) ?(.auto):(modeID == 1 ? (.on) : (.off))
+    func setFlashMode(mode: AVCaptureDevice.TorchMode){
+        do{
+            if (captureDevice.hasFlash)
+            {
+                try captureDevice.lockForConfiguration()
+                captureDevice.torchMode = mode
 //                    captureDevice.flashMode = (modeID == 2) ?(.auto):(modeID == 1 ? (.on) : (.off))
-                    captureDevice.unlockForConfiguration()
-                }
-            }catch{
-                //DISABEL FLASH BUTTON HERE IF ERROR
-                print("Device tourch Flash Error ");
+                captureDevice.unlockForConfiguration()
             }
-            
-        
+        }catch{
+            print("Device tourch Flash Error ");
+        }
+    }
+    
+    func changeFlashMode(modeID: Int,result:  @escaping FlutterResult){
+        setFlashMode(mode: (modeID == 2) ?(.auto):(modeID == 1 ? (.on) : (.off)))
         result(true)
     }
     
