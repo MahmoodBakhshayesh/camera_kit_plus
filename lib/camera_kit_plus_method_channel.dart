@@ -1,3 +1,4 @@
+import 'package:camera_kit_plus/enums.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -13,5 +14,25 @@ class MethodChannelCameraKitPlus extends CameraKitPlusPlatform {
   Future<String?> getPlatformVersion() async {
     final version = await methodChannel.invokeMethod<String>('getPlatformVersion');
     return version;
+  }
+
+  @override
+  Future<bool> pauseCamera() async {
+    final success = await methodChannel.invokeMethod<bool>('pauseCamera');
+    return success ?? false;
+  }
+
+  @override
+  Future<bool> resumeCamera() async {
+    final success = await methodChannel.invokeMethod<bool>('resumeCamera');
+    return success ?? false;
+  }
+
+  @override
+  Future<bool> changeFlashMode(CameraKitPlusFlashMode mode) async {
+    final version = await methodChannel.invokeMethod<bool>('changeFlashMode', {
+      "flashModeID":mode.index
+    });
+    return version ?? false;
   }
 }

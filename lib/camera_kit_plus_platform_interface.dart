@@ -1,3 +1,4 @@
+import 'package:camera_kit_plus/enums.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'camera_kit_plus_method_channel.dart';
@@ -25,5 +26,17 @@ abstract class CameraKitPlusPlatform extends PlatformInterface {
 
   Future<String?> getPlatformVersion() {
     throw UnimplementedError('platformVersion() has not been implemented.');
+  }
+
+  Future<bool> pauseCamera() {
+    throw UnimplementedError('pauseCamera() has not been implemented.');
+  }
+
+  Future<bool> resumeCamera() {
+    throw UnimplementedError('resumeCamera() has not been implemented.');
+  }
+
+  Future<bool> changeFlashMode(CameraKitPlusFlashMode mode) {
+    throw UnimplementedError('changeFlashMode(mode) has not been implemented.');
   }
 }

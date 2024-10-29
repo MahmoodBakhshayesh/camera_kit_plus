@@ -1,7 +1,7 @@
 name: camera_kit_plus
-description: "Camera Kit Plus"
+description: A Flutter Plugin Using Camera to Scan Barcodes
 version: 0.0.1
-homepage:
+homepage: https://github.com/MahmoodBakhshayesh/camera_kit_plus
 
 environment:
   sdk: ^3.5.0
@@ -12,7 +12,8 @@ dependencies:
     sdk: flutter
   flutter_web_plugins:
     sdk: flutter
-  web: ^0.5.1
+  web: ^1.0.0
+  visibility_detector: ^0.4.0+2
   plugin_platform_interface: ^2.0.2
 
 dev_dependencies:

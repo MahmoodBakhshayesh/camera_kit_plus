@@ -1,3 +1,5 @@
+import 'package:camera_kit_plus/camera_kit_plus_controller.dart';
+import 'package:camera_kit_plus/enums.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
 
@@ -18,6 +20,7 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   String _platformVersion = 'Unknown';
   final _cameraKitPlusPlugin = CameraKitPlus();
+  CameraKitPlusController controller = CameraKitPlusController();
 
   @override
   void initState() {
@@ -58,7 +61,9 @@ class _MyAppState extends State<MyApp> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(child: CameraKitPlusView(
+              Expanded(
+                  child: CameraKitPlusView(
+                controller: controller,
                 onBarcodeRead: (String code) {
                   print(code);
                 },
@@ -66,6 +71,34 @@ class _MyAppState extends State<MyApp> {
               Expanded(
                 child: Container(
                   color: Colors.red,
+                  child: Column(
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          controller.pauseCamera();
+                        },
+                        child: Text("Pause"),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          controller.resumeCamera();
+                        },
+                        child: Text("Continue"),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          controller.changeFlashMode(CameraKitPlusFlashMode.off);
+                        },
+                        child: Text("off"),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          controller.changeFlashMode(CameraKitPlusFlashMode.on);
+                        },
+                        child: Text("on"),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               Text('Running on: $_platformVersion\n'),
