@@ -7,8 +7,10 @@ public class CameraKitPlusPlugin: NSObject, FlutterPlugin {
     let instance = CameraKitPlusPlugin()
     
     let factory = CameraKitPlusViewFactory(messenger: registrar.messenger())
+    let ocrFactory = CameraKitOcrPlusViewFactory(messenger: registrar.messenger())
 
     registrar.register(factory, withId: "camera-kit-plus-view")
+    registrar.register(ocrFactory, withId: "camera-kit-ocr-plus-view")
     registrar.addMethodCallDelegate(instance, channel: channel)
   }
 

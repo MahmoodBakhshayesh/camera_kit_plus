@@ -169,16 +169,24 @@ class CameraKitOcrPlusView(context: Context, messenger: BinaryMessenger) : Frame
                     .addOnSuccessListener { text ->
                         if (text.text.trim { it <= ' ' }.isEmpty()) {
                         } else {
+                            Log.println(Log.ASSERT,"block count",text.textBlocks.count().toString());
                             val lineModels: MutableList<LineModel> = ArrayList<LineModel>()
+
                             for (b in text.textBlocks) {
+                                Log.println(Log.ASSERT,"block lines count",b.lines.count().toString());
                                 for (line in b.lines) {
+                                    Log.println(Log.ASSERT,"dasd",line.text);
                                     val lineModel: LineModel = LineModel(line.text)
                                     for (p in Objects.requireNonNull<Array<Point>?>(line.cornerPoints)) {
                                         lineModel.cornerPoints.add(CornerPointModel(p.x.toFloat(), p.y.toFloat()))
+                                        lineModel.text = line.text;
                                     }
+                                    Log.println(Log.ASSERT,"dasd",lineModel.text);
                                     lineModels.add(lineModel)
                                 }
                             }
+                            Log.println(Log.ASSERT,"dasd",lineModels.count().toString());
+
                             val gson: Gson = Gson()
                             gson.toJson(lineModels)
 

@@ -64,8 +64,9 @@ class _MyAppState extends State<MyApp> {
               Expanded(
                   child: CameraKitOcrPlusView(
                 controller: controller,
+
                 onTextRead: (OcrData data) {
-                  print(data.text);
+                  print(data.toJson());
                 },
               )),
               Expanded(
