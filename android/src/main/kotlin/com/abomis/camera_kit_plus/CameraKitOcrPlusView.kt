@@ -24,25 +24,28 @@ import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
-import com.google.mlkit.vision.barcode.BarcodeScanner
-import com.google.mlkit.vision.barcode.BarcodeScannerOptions
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
+import com.abomis.camera_kit_plus.Classes.CornerPointModel
+import com.abomis.camera_kit_plus.Classes.LineModel
+import com.google.gson.Gson
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.platform.PlatformView
+import java.util.Objects
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLayout(context), PlatformView, MethodCallHandler {
+class CameraKitOcrPlusView(context: Context, messenger: BinaryMessenger) : FrameLayout(context), PlatformView, MethodCallHandler {
     private val methodChannel = MethodChannel(messenger, "camera_kit_plus")
     private lateinit var previewView: PreviewView
     private lateinit var linearLayout: FrameLayout
     private var cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
-    private lateinit var barcodeScanner: BarcodeScanner
+    private lateinit var textScanner: TextRecognizer
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
     private var cameraSelector: CameraSelector? = null
@@ -99,10 +102,8 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
         val activity = getActivity(context)
         val lifecycleOwner = activity as LifecycleOwner
 
-        val options = BarcodeScannerOptions.Builder()
-                .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS) // Scan all types of barcodes
-                .build()
-        barcodeScanner = BarcodeScanning.getClient(options)
+        textScanner = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+
 
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
@@ -164,14 +165,33 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
         val mediaImage = imageProxy.image
         if (mediaImage != null) {
             val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-            barcodeScanner.process(image)
-                    .addOnSuccessListener { barcodes ->
-                        for (barcode in barcodes) {
-                            methodChannel.invokeMethod("onBarcodeScanned", "${barcode.rawValue}")
+            textScanner.process(image)
+                    .addOnSuccessListener { text ->
+                        if (text.text.trim { it <= ' ' }.isEmpty()) {
+                        } else {
+                            val lineModels: MutableList<LineModel> = ArrayList<LineModel>()
+                            for (b in text.textBlocks) {
+                                for (line in b.lines) {
+                                    val lineModel: LineModel = LineModel(line.text)
+                                    for (p in Objects.requireNonNull<Array<Point>?>(line.cornerPoints)) {
+                                        lineModel.cornerPoints.add(CornerPointModel(p.x.toFloat(), p.y.toFloat()))
+                                    }
+                                    lineModels.add(lineModel)
+                                }
+                            }
+                            val gson: Gson = Gson()
+                            gson.toJson(lineModels)
+
+                            val map: MutableMap<String, Any> = HashMap()
+                            map["text"] = text.text
+                            map["lines"] = lineModels
+                            map["path"] = ""
+                            map["orientation"] = 0
+                            methodChannel.invokeMethod("onTextRead", Gson().toJson(map))
                         }
                     }
                     .addOnFailureListener {
-                        Log.e("Barcode", "Failed to scan barcode", it)
+                        Log.e("Text", "Failed to scan barcode", it)
                     }
                     .addOnCompleteListener {
                         imageProxy.close() // Make sure to close the image proxy
@@ -190,16 +210,6 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "getPlatformVersion" -> result.success("Android" + Build.VERSION.RELEASE)
-//            "getCameraPermission" -> getCameraPermission(result)
-//            "initCamera" -> {
-//                val initFlashModeID = call.argument<Int>("initFlashModeID")!!
-//                val fill = java.lang.Boolean.TRUE == call.argument("fill")
-//                val barcodeTypeID = call.argument<Int>("barcodeTypeID")!!
-//                val modeID = call.argument<Int>("modeID")!!
-//                val cameraID = call.argument<Int>("cameraTypeID")!!
-//                initCamera(initFlashModeID, fill, barcodeTypeID, cameraID, modeID)
-//            }
-
             "changeFlashMode" -> {
                 val flashModeID = call.argument<Int>("flashModeID")!!
                 changeFlashMode(flashModeID,result)
@@ -210,23 +220,8 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
                 switchCamera(cameraID,result)
             }
 
-//            "changeCameraVisibility" -> {
-//                val visibility = java.lang.Boolean.TRUE == call.argument("visibility")
-//                changeCameraVisibility(visibility)
-//            }
-
             "pauseCamera" -> pauseCamera(result)
             "resumeCamera" -> resumeCamera(result)
-//            "takePicture" -> {
-//                val path = call.argument<String>("path")
-//                takePicture(path, result)
-//            }
-
-//            "processImageFromPath" -> {
-//                val imgPath = call.argument<String>("path")
-//                processImageFromPath(imgPath, result)
-//            }
-
             "dispose" -> dispose()
             else -> result.notImplemented()
         }
@@ -250,8 +245,8 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
 
     private fun pauseCamera(result: MethodChannel.Result) {
         cameraProvider?.unbindAll()
-        if (barcodeScanner != null) {
-            barcodeScanner.close()
+        if (textScanner != null) {
+            textScanner.close()
 //            barcodeScanner = null
         }
 

@@ -18,6 +18,7 @@ class CameraKitPlusPlugin: FlutterPlugin, MethodCallHandler {
 //    channel = MethodChannel(flutterPluginBinding.binaryMessenger, "camera_kit_plus")
 
     flutterPluginBinding.platformViewRegistry.registerViewFactory("camera-kit-plus-view", CameraKitPlusViewFactory(flutterPluginBinding.binaryMessenger))
+    flutterPluginBinding.platformViewRegistry.registerViewFactory("camera-kit-ocr-plus-view", CameraKitOcrPlusViewFactory(flutterPluginBinding.binaryMessenger))
 
 //    channel.setMethodCallHandler(this)
   }

@@ -62,10 +62,10 @@ class _MyAppState extends State<MyApp> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
-                  child: CameraKitPlusView(
+                  child: CameraKitOcrPlusView(
                 controller: controller,
-                onBarcodeRead: (String code) {
-                  print(code);
+                onTextRead: (OcrData data) {
+                  print(data.text);
                 },
               )),
               Expanded(
