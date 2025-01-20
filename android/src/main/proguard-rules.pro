@@ -1,6 +1,7 @@
 # Prevent obfuscation and stripping of the LineModel and CornerPointModel
 -keep class com.abomis.camera_kit_plus.Classes.LineModel { *; }
 -keep class com.abomis.camera_kit_plus.Classes.CornerPointModel { *; }
+-keep class com.abomis.camera_kit_plus.Classes.BarcodeData { *; }
 
 # Keep Gson annotations and serialized names
 -keepattributes *Annotation*

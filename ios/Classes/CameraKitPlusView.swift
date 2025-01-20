@@ -187,7 +187,8 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
         if captureSession.canAddOutput(metadataOutput) == true {
             captureSession.addOutput(metadataOutput)
             metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
-            metadataOutput.metadataObjectTypes = [.ean13, .qr, .pdf417,.interleaved2of5,]  // Define the type of barcodes you want to scan
+            
+            metadataOutput.metadataObjectTypes = [.ean13, .qr, .pdf417,.interleaved2of5,.code128,.aztec,.code39,.code39Mod43,.code93,.dataMatrix,.ean8,.interleaved2of5,.itf14,]  // Define the type of barcodes you want to scan
         } else {
             print("Could not add metadata output to session")
             return
@@ -234,6 +235,17 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
                 if let stringValue = readableObject.stringValue {
                     // Barcode is detected and here is the value:
                     channel?.invokeMethod("onBarcodeScanned", arguments: readableObject.stringValue)
+                    
+                    var data = BarcodeData(value: readableObject.stringValue, type: intBarcodeCode(for: readableObject.type), cornerPoints: [])
+
+                    for c in readableObject.corners {
+                        data.cornerPoints.append(CornerPointModel(x: c.x, y: c.y))
+                    }
+                    let jsonEncoder = JSONEncoder()
+                    let jsonData = try! jsonEncoder.encode(data)
+                    let json = String(data: jsonData, encoding: String.Encoding.utf8)
+                    channel?.invokeMethod("onBarcodeDataScanned", arguments: json)
+                    
                     // You can use a Flutter method channel to send the barcode back to Flutter
 //                    AudioServicesPlaySystemSound(SystemSoundID(kSystemSoundID_Vibrate))
                 }
@@ -246,4 +258,45 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
         captureSession.stopRunning()
     }
 }
+
+
+struct BarcodeData: Codable {
+    var value: String?
+    var type: Int?
+    var cornerPoints : [CornerPointModel] = []
+}
+
+func intBarcodeCode(for type: AVMetadataObject.ObjectType) -> Int {
+    switch type {
+    case .aztec:
+        return 4096
+    case .code39:
+        return 2
+    case .code39Mod43:
+        return 2 // Android doesn't distinguish between Code 39 and Code 39 Mod 43
+    case .code93:
+        return 4
+    case .code128:
+        return 1
+    case .dataMatrix:
+        return 16
+    case .ean8:
+        return 64
+    case .ean13:
+        return 32
+    case .interleaved2of5:
+        return 128
+    case .itf14:
+        return 128 // Android uses the same code for ITF and Interleaved 2 of 5
+    case .pdf417:
+        return 2048
+    case .qr:
+        return 256
+    default:
+        return 0 // Unknown or unsupported type
+    }
+}
+
+// Encode
+
 

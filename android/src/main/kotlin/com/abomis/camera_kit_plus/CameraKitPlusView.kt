@@ -24,6 +24,8 @@ import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
+import com.abomis.camera_kit_plus.Classes.BarcodeData
+import com.google.gson.Gson
 import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -168,6 +170,7 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
                     .addOnSuccessListener { barcodes ->
                         for (barcode in barcodes) {
                             methodChannel.invokeMethod("onBarcodeScanned", "${barcode.rawValue}")
+                            methodChannel.invokeMethod("onBarcodeDataScanned", Gson().toJson(BarcodeData(barcode)))
                         }
                     }
                     .addOnFailureListener {
