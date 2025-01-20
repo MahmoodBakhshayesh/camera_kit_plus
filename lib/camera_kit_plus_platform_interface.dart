@@ -43,4 +43,8 @@ abstract class CameraKitPlusPlatform extends PlatformInterface {
   Future<bool> switchCamera(CameraKitPlusCameraMode mode) {
     throw UnimplementedError('switchCamera(mode) has not been implemented.');
   }
+
+  Future<bool> getCameraPermission() {
+    throw UnimplementedError('getCameraPermissionhas not been implemented.');
+  }
 }

@@ -48,6 +48,7 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
         let myArgs = args as? [String: Any]
         switch call.method {
         case "getCameraPermission":
+            self.requestCameraPermission(result: result)
             break
         case "initCamera":
             break
@@ -63,6 +64,14 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
             break
         default:
             result(false)
+        }
+    }
+    
+    func requestCameraPermission(result:  @escaping FlutterResult) {
+        if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(settingsURL)
+            print(settingsURL)
+            result(true)
         }
     }
 

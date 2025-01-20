@@ -19,17 +19,56 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
     private var channel: FlutterMethodChannel?
     var initCameraFinished:Bool! = false
     var cameraID = 0
+    var hasButton = false
 
     
     init(frame: CGRect, messenger: FlutterBinaryMessenger) {
         _view = UIView(frame: frame)
-        _view.backgroundColor = UIColor.blue
+        _view.backgroundColor = UIColor.black
         super.init()
+       
         setupAVCapture()
         setupCamera()
         channel = FlutterMethodChannel(name: "camera_kit_plus", binaryMessenger: messenger)
         channel?.setMethodCallHandler(handle)
        
+    }
+    
+    func addButtonToView() {
+        if(hasButton){
+            return
+        }
+        let button = UIButton(type: .system)
+        
+        // Set the button's title
+        button.setTitle("Need Camera Permission!", for: .normal)
+        button.setTitleColor(.white, for: .normal)
+        button.backgroundColor = UIColor.systemBlue
+        button.layer.cornerRadius = 8
+
+        // Set the button's size and position
+        button.translatesAutoresizingMaskIntoConstraints = false
+
+        // Add a target-action for the button
+        button.addTarget(self, action: #selector(buttonTapped), for: .touchUpInside)
+
+        // Add the button to the view
+        _view.addSubview(button)
+
+        // Center the button in the view
+        NSLayoutConstraint.activate([
+            button.centerXAnchor.constraint(equalTo: _view.centerXAnchor),
+            button.centerYAnchor.constraint(equalTo: _view.centerYAnchor),
+            button.widthAnchor.constraint(equalToConstant: 250),
+            button.heightAnchor.constraint(equalToConstant: 50)
+        ])
+        hasButton = true
+    }
+
+    @objc func buttonTapped() {
+        if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(settingsURL)
+        }
     }
 
     func view() -> UIView {
@@ -41,7 +80,7 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
         let myArgs = args as? [String: Any]
         switch call.method {
         case "getCameraPermission":
-//            self.getCameraPermission(flutterResult: result)
+            self.requestCameraPermission(result: result)
             break
         case "initCamera":
 //            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
@@ -114,6 +153,14 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
 
     }
     
+    func requestCameraPermission(result:  @escaping FlutterResult) {
+        if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(settingsURL)
+            print(settingsURL)
+            result(true)
+        }
+    }
+    
     
     func setupAVCapture(){
         captureSession.sessionPreset = AVCaptureSession.Preset.high
@@ -144,14 +191,26 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
             let rootLayer :CALayer = self._view.layer
             rootLayer.masksToBounds = true
             if(rootLayer.bounds.size.width != 0 && rootLayer.bounds.size.width != 0){
-                self._view.frame = rootLayer.bounds
-                var previewLayer = AVCaptureVideoPreviewLayer(session: self.captureSession)
-                previewLayer.videoGravity = .resizeAspectFill  // This makes the preview take up all available space
-                previewLayer.frame = self._view.layer.bounds  // Set the preview layer to match the view's bounds
-                previewLayer.backgroundColor = UIColor.green.cgColor  // For debugging purposes
-                self._view.layer.addSublayer(previewLayer)
-                self.captureSession.startRunning()
+                let per = self.requestCameraPermission();
+                if(per){
+                    self._view.frame = rootLayer.bounds
+                   
+                    var previewLayer = AVCaptureVideoPreviewLayer(session: self.captureSession)
+                    previewLayer.videoGravity = .resizeAspectFill  // This makes the preview take up all available space
+                    previewLayer.frame = self._view.layer.bounds  // Set the preview layer to match the view's bounds
+                    previewLayer.backgroundColor = UIColor.green.cgColor  // For debugging purposes
+                    self._view.layer.addSublayer(previewLayer)
+                    self.captureSession.startRunning()
+                }else{
+                    self.addButtonToView()
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+                        self.startSession(isFirst: isFirst)
+                    }
+                }
+                
+              
             } else {
+                self.addButtonToView()
                 DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
                     self.startSession(isFirst: isFirst)
                 }
@@ -159,41 +218,60 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
         }
     }
     
+    
+    func requestCameraPermission() -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return false
+        case .denied, .restricted:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+    
     private func setupCamera() {
         print("setupCamera")
         
-        // Set the video capture device to the default camera
-//        self.captureDevice = AVCaptureDevice.default(AVCaptureDevice.DeviceType.builtInWideAngleCamera,for: .video,position: .front)
-//        setFlashMode(mode: .off)
-        
-        let videoInput: AVCaptureDeviceInput
-        do {
-            videoInput = try AVCaptureDeviceInput(device:  self.captureDevice)
-        } catch {
-            print("Failed to set up camera input: \(error)")
-            return
-        }
 
-        // Add video input to capture session
-        if captureSession.canAddInput(videoInput) == true {
-            captureSession.addInput(videoInput)
-        } else {
-            print("Could not add video input to session")
-            return
-        }
-
-        // Set up the metadata output for barcode scanning (optional)
-        let metadataOutput = AVCaptureMetadataOutput()
-        if captureSession.canAddOutput(metadataOutput) == true {
-            captureSession.addOutput(metadataOutput)
-            metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
             
-            metadataOutput.metadataObjectTypes = [.ean13, .qr, .pdf417,.interleaved2of5,.code128,.aztec,.code39,.code39Mod43,.code93,.dataMatrix,.ean8,.interleaved2of5,.itf14,]  // Define the type of barcodes you want to scan
-        } else {
-            print("Could not add metadata output to session")
-            return
-        }
-        startSession(isFirst: true)
+            // Set the video capture device to the default camera
+            //        self.captureDevice = AVCaptureDevice.default(AVCaptureDevice.DeviceType.builtInWideAngleCamera,for: .video,position: .front)
+            //        setFlashMode(mode: .off)
+            
+            let videoInput: AVCaptureDeviceInput
+            do {
+                videoInput = try AVCaptureDeviceInput(device:  self.captureDevice)
+            } catch {
+//                self.addButtonToView()
+                print("Failed to set up camera input: \(error)")
+                return
+            }
+            
+            // Add video input to capture session
+            if captureSession.canAddInput(videoInput) == true {
+                captureSession.addInput(videoInput)
+            } else {
+//                self.addButtonToView()
+                print("Could not add video input to session")
+                return
+            }
+            
+            // Set up the metadata output for barcode scanning (optional)
+            let metadataOutput = AVCaptureMetadataOutput()
+            if captureSession.canAddOutput(metadataOutput) == true {
+                captureSession.addOutput(metadataOutput)
+                metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
+                
+                metadataOutput.metadataObjectTypes = [.ean13, .qr, .pdf417,.interleaved2of5,.code128,.aztec,.code39,.code39Mod43,.code93,.dataMatrix,.ean8,.interleaved2of5,.itf14,]  // Define the type of barcodes you want to scan
+            } else {
+//                self.addButtonToView()
+                print("Could not add metadata output to session")
+                return
+            }
+            startSession(isFirst: true)
        
     }
     

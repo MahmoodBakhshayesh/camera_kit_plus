@@ -43,4 +43,11 @@ class MethodChannelCameraKitPlus extends CameraKitPlusPlatform {
     });
     return version ?? false;
   }
+
+  @override
+  Future<bool> getCameraPermission() async {
+    final permission = await methodChannel.invokeMethod<bool>('getCameraPermission');
+
+    return permission ?? false;
+  }
 }

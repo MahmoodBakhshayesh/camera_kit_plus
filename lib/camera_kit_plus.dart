@@ -24,4 +24,7 @@ class CameraKitPlus {
   Future<bool> switchCamera(CameraKitPlusCameraMode mode) {
     return CameraKitPlusPlatform.instance.switchCamera(mode);
   }
+  Future<bool> getCameraPermission() {
+    return CameraKitPlusPlatform.instance.getCameraPermission();
+  }
 }
