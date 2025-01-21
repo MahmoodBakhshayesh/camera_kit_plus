@@ -36,4 +36,7 @@ class CameraKitPlusPlugin: FlutterPlugin, MethodCallHandler {
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
 //    channel.setMethodCallHandler(null)
   }
+
+
+
 }

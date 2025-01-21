@@ -8,9 +8,12 @@ import android.os.Build
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
+import androidx.annotation.RequiresApi
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -36,6 +39,10 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.platform.PlatformView
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -48,7 +55,7 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
     private var cameraSelector: CameraSelector? = null
-
+    private var hasButton:Boolean=  false
     private var preview: Preview? = null
     val REQUEST_CAMERA_PERMISSION = 1001
 
@@ -84,6 +91,9 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
         displaySize.y = screenHeight
         linearLayout.layoutParams = LayoutParams(displaySize.x, displaySize.y)
         linearLayout.addView(previewView)
+//        Log.println(Log.ERROR,"No Permission? ","add Button ? ");
+
+
         setupCameraSelector()
         setupCamera()
     }
@@ -97,27 +107,63 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
         cameraSelector =  CameraSelector.DEFAULT_BACK_CAMERA
     }
 
+    private fun  addPermissionButton(){
+        // Create a button
+        if(hasButton){
+            return;
+        }
+        val button = Button(context).apply {
+            text = "Need Camera Permission!"
+            setTextColor(ContextCompat.getColor(context, android.R.color.white))
+            setBackgroundColor(ContextCompat.getColor(context, android.R.color.holo_blue_dark))
+            setPadding(20, 20, 20, 20)
+        }
+
+        // Set button layout parameters
+        val buttonParams = LayoutParams(
+            LayoutParams.WRAP_CONTENT,
+            LayoutParams.WRAP_CONTENT
+        ).apply {
+            gravity = android.view.Gravity.CENTER
+        }
+
+        button.layoutParams = buttonParams
+        button.setOnClickListener {
+           Log.println(Log.ASSERT,"butt","sada");
+            ActivityCompat.requestPermissions(
+                getActivity(context)!!,
+                arrayOf(Manifest.permission.CAMERA),
+                REQUEST_CAMERA_PERMISSION
+            )
+        }
+        // Add the button to the view
+        linearLayout.addView(button)
+        hasButton = true;
+    }
+
+
     private fun setupCamera() {
         val activity = getActivity(context)
         val lifecycleOwner = activity as LifecycleOwner
-
-        val options = BarcodeScannerOptions.Builder()
+            Log.println(Log.ERROR,"setup Camera","Setup Camera")
+//            addPermissionButton()
+            val options = BarcodeScannerOptions.Builder()
                 .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS) // Scan all types of barcodes
                 .build()
-        barcodeScanner = BarcodeScanning.getClient(options)
+            barcodeScanner = BarcodeScanning.getClient(options)
 
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-        cameraProviderFuture.addListener({
-            cameraProvider = cameraProviderFuture.get()
+            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+            cameraProviderFuture.addListener({
+                cameraProvider = cameraProviderFuture.get()
 
-            preview = Preview.Builder()
+                preview = Preview.Builder()
                     .setTargetAspectRatio(AspectRatio.RATIO_16_9)
                     .build()
                     .also {
                         it.setSurfaceProvider(previewView.surfaceProvider)
                     }
 
-            val imageAnalysis = ImageAnalysis.Builder()
+                val imageAnalysis = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
 
                     .build()
@@ -127,24 +173,60 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
                         }
                     }
 
-            // Select the back camera as default
-//            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                // Select the back camera as default
+//                cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
-            // Unbind all use cases before rebinding
-            cameraProvider?.unbindAll()
-            preview = Preview.Builder().setTargetAspectRatio(AspectRatio.RATIO_16_9).setTargetRotation(previewView.rotation.toInt()).build()
-            preview!!.setSurfaceProvider(previewView.surfaceProvider)
-            try {
-                camera = cameraProvider?.bindToLifecycle(
+                // Unbind all use cases before rebinding
+                cameraProvider?.unbindAll()
+                preview = Preview.Builder().setTargetAspectRatio(AspectRatio.RATIO_16_9).setTargetRotation(previewView.rotation.toInt()).build()
+                preview!!.setSurfaceProvider(previewView.surfaceProvider)
+                try {
+                    camera = cameraProvider?.bindToLifecycle(
                         lifecycleOwner,
                         cameraSelector!!,
                         preview,
                         imageAnalysis
-                )
-            } catch (exc: Exception) {
-                Log.e("CameraX", "Use case binding failed", exc)
-            }
-        }, ContextCompat.getMainExecutor(context))
+                    )
+//                    if(cameraSelector == null){
+//                        callWithDelay(500) {
+//                            Log.println(Log.DEBUG,"calling setup again","calling setup again")
+//                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+//                                cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+//                            }
+//                            setupCamera()
+//                        }
+//                    }else {
+//                        camera = cameraProvider?.bindToLifecycle(
+//                            lifecycleOwner,
+//                            cameraSelector!!,
+//                            preview,
+//                            imageAnalysis
+//                        )
+//                    }
+                } catch (exc: Exception) {
+                    Log.e("CameraX", "Use case binding failed", exc)
+                    Log.println(Log.DEBUG,"should setup again","should setup again")
+
+//                    callWithDelay(500) {
+//                        Log.println(Log.DEBUG,"calling setup again","calling setup again")
+//
+//                        setupCamera()
+//                    }
+
+
+                }
+
+            }, ContextCompat.getMainExecutor(context))
+
+
+
+    }
+
+    fun callWithDelay(delayMillis: Long, function: () -> Unit) {
+        CoroutineScope(Dispatchers.Main).launch {
+            delay(delayMillis)
+            function()
+        }
     }
 
     private fun getActivity(context: Context): Activity? {
