@@ -2,7 +2,6 @@ package com.abomis.camera_kit_plus
 
 import CameraKitPlusView
 import android.content.Context
-import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory

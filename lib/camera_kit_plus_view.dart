@@ -33,7 +33,6 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView> {
 
   Future<PermissionStatus> checkCameraPermission() async {
     var status = await Permission.camera.status;
-    print(status);
     return status;
   }
 
@@ -165,12 +164,7 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView> {
     bool isVisible = !(info.visibleFraction == 0);
     if (isVisible) {
       print("object visible");
-      checkCameraPermission();
-      setState(() {
-
-      });
       controller.resumeCamera();
-
     } else {
       print("object not visible");
       controller.pauseCamera();

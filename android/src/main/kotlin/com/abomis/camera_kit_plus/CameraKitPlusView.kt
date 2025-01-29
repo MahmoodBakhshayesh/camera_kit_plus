@@ -8,12 +8,9 @@ import android.os.Build
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
-import androidx.annotation.RequiresApi
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -27,8 +24,6 @@ import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
-import com.abomis.camera_kit_plus.Classes.BarcodeData
-import com.google.gson.Gson
 import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -39,10 +34,6 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.platform.PlatformView
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -51,19 +42,20 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
     private lateinit var previewView: PreviewView
     private lateinit var linearLayout: FrameLayout
     private var cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+
     private lateinit var barcodeScanner: BarcodeScanner
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
     private var cameraSelector: CameraSelector? = null
-    private var hasButton:Boolean=  false
+
     private var preview: Preview? = null
     val REQUEST_CAMERA_PERMISSION = 1001
 
     init {
         linearLayout = getActivity(context)?.let { FrameLayout(it) }!!
         linearLayout.layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.MATCH_PARENT)
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.MATCH_PARENT)
         linearLayout.setBackgroundColor(Color.parseColor("#000000"))
         previewView = getActivity(context)?.let { PreviewView(it) }!!
         previewView.layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
@@ -71,9 +63,9 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
         methodChannel.setMethodCallHandler(this)
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(
-                    getActivity(context)!!,
-                    arrayOf(Manifest.permission.CAMERA),
-                    REQUEST_CAMERA_PERMISSION
+                getActivity(context)!!,
+                arrayOf(Manifest.permission.CAMERA),
+                REQUEST_CAMERA_PERMISSION
             )
         } else {
             setupPreview()
@@ -91,9 +83,6 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
         displaySize.y = screenHeight
         linearLayout.layoutParams = LayoutParams(displaySize.x, displaySize.y)
         linearLayout.addView(previewView)
-//        Log.println(Log.ERROR,"No Permission? ","add Button ? ");
-
-
         setupCameraSelector()
         setupCamera()
     }
@@ -107,127 +96,58 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
         cameraSelector =  CameraSelector.DEFAULT_BACK_CAMERA
     }
 
-    private fun  addPermissionButton(){
-        // Create a button
-        if(hasButton){
-            return;
-        }
-        val button = Button(context).apply {
-            text = "Need Camera Permission!"
-            setTextColor(ContextCompat.getColor(context, android.R.color.white))
-            setBackgroundColor(ContextCompat.getColor(context, android.R.color.holo_blue_dark))
-            setPadding(20, 20, 20, 20)
-        }
-
-        // Set button layout parameters
-        val buttonParams = LayoutParams(
-            LayoutParams.WRAP_CONTENT,
-            LayoutParams.WRAP_CONTENT
-        ).apply {
-            gravity = android.view.Gravity.CENTER
-        }
-
-        button.layoutParams = buttonParams
-        button.setOnClickListener {
-           Log.println(Log.ASSERT,"butt","sada");
-            ActivityCompat.requestPermissions(
-                getActivity(context)!!,
-                arrayOf(Manifest.permission.CAMERA),
-                REQUEST_CAMERA_PERMISSION
-            )
-        }
-        // Add the button to the view
-        linearLayout.addView(button)
-        hasButton = true;
-    }
-
 
     private fun setupCamera() {
         val activity = getActivity(context)
         val lifecycleOwner = activity as LifecycleOwner
-            Log.println(Log.ERROR,"setup Camera","Setup Camera")
-//            addPermissionButton()
-            val options = BarcodeScannerOptions.Builder()
-                .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS) // Scan all types of barcodes
+
+        val options = BarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS) // Scan all types of barcodes
+            .build()
+        barcodeScanner = BarcodeScanning.getClient(options)
+
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        cameraProviderFuture.addListener({
+            cameraProvider = cameraProviderFuture.get()
+
+            preview = Preview.Builder()
+                .setTargetAspectRatio(AspectRatio.RATIO_16_9)
                 .build()
-            barcodeScanner = BarcodeScanning.getClient(options)
-
-            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-            cameraProviderFuture.addListener({
-                cameraProvider = cameraProviderFuture.get()
-
-                preview = Preview.Builder()
-                    .setTargetAspectRatio(AspectRatio.RATIO_16_9)
-                    .build()
-                    .also {
-                        it.setSurfaceProvider(previewView.surfaceProvider)
-                    }
-
-                val imageAnalysis = ImageAnalysis.Builder()
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-
-                    .build()
-                    .also {
-                        it.setAnalyzer(cameraExecutor) { imageProxy ->
-                            processImageProxy(imageProxy)
-                        }
-                    }
-
-                // Select the back camera as default
-//                cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-                // Unbind all use cases before rebinding
-                cameraProvider?.unbindAll()
-                preview = Preview.Builder().setTargetAspectRatio(AspectRatio.RATIO_16_9).setTargetRotation(previewView.rotation.toInt()).build()
-                preview!!.setSurfaceProvider(previewView.surfaceProvider)
-                try {
-                    camera = cameraProvider?.bindToLifecycle(
-                        lifecycleOwner,
-                        cameraSelector!!,
-                        preview,
-                        imageAnalysis
-                    )
-//                    if(cameraSelector == null){
-//                        callWithDelay(500) {
-//                            Log.println(Log.DEBUG,"calling setup again","calling setup again")
-//                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-//                                cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-//                            }
-//                            setupCamera()
-//                        }
-//                    }else {
-//                        camera = cameraProvider?.bindToLifecycle(
-//                            lifecycleOwner,
-//                            cameraSelector!!,
-//                            preview,
-//                            imageAnalysis
-//                        )
-//                    }
-                } catch (exc: Exception) {
-                    Log.e("CameraX", "Use case binding failed", exc)
-                    Log.println(Log.DEBUG,"should setup again","should setup again")
-
-//                    callWithDelay(500) {
-//                        Log.println(Log.DEBUG,"calling setup again","calling setup again")
-//
-//                        setupCamera()
-//                    }
-
-
+                .also {
+                    it.setSurfaceProvider(previewView.surfaceProvider)
                 }
 
-            }, ContextCompat.getMainExecutor(context))
+            val imageAnalysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
 
+                .build()
+                .also {
+                    it.setAnalyzer(cameraExecutor) { imageProxy ->
+                        processImageProxy(imageProxy)
+                    }
+                }
 
+            // Select the back camera as default
+//            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
+            // Unbind all use cases before rebinding
+            cameraProvider?.unbindAll()
+            preview = Preview.Builder().setTargetAspectRatio(AspectRatio.RATIO_16_9).setTargetRotation(previewView.rotation.toInt()).build()
+            preview!!.setSurfaceProvider(previewView.surfaceProvider)
+            try {
+                camera = cameraProvider?.bindToLifecycle(
+                    lifecycleOwner,
+                    cameraSelector!!,
+                    preview,
+                    imageAnalysis
+                )
+            } catch (exc: Exception) {
+                Log.e("CameraX", "Use case binding failed", exc)
+            }
+        }, ContextCompat.getMainExecutor(context))
     }
 
-    fun callWithDelay(delayMillis: Long, function: () -> Unit) {
-        CoroutineScope(Dispatchers.Main).launch {
-            delay(delayMillis)
-            function()
-        }
-    }
+
 
     private fun getActivity(context: Context): Activity? {
         var contextTemp = context
@@ -249,18 +169,17 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
         if (mediaImage != null) {
             val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
             barcodeScanner.process(image)
-                    .addOnSuccessListener { barcodes ->
-                        for (barcode in barcodes) {
-                            methodChannel.invokeMethod("onBarcodeScanned", "${barcode.rawValue}")
-                            methodChannel.invokeMethod("onBarcodeDataScanned", Gson().toJson(BarcodeData(barcode)))
-                        }
+                .addOnSuccessListener { barcodes ->
+                    for (barcode in barcodes) {
+                        methodChannel.invokeMethod("onBarcodeScanned", "${barcode.rawValue}")
                     }
-                    .addOnFailureListener {
-                        Log.e("Barcode", "Failed to scan barcode", it)
-                    }
-                    .addOnCompleteListener {
-                        imageProxy.close() // Make sure to close the image proxy
-                    }
+                }
+                .addOnFailureListener {
+                    Log.e("Barcode", "Failed to scan barcode", it)
+                }
+                .addOnCompleteListener {
+                    imageProxy.close() // Make sure to close the image proxy
+                }
         }
     }
 
@@ -330,7 +249,7 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
     }
 
     private fun resumeCamera(result: MethodChannel.Result) {
-       setupCamera()
+        setupCamera()
     }
 
     private fun pauseCamera(result: MethodChannel.Result) {
