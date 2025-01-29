@@ -10,13 +10,13 @@ import android.util.Log
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import androidx.annotation.OptIn
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -34,6 +34,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.platform.PlatformView
+import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -42,6 +43,7 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
     private lateinit var previewView: PreviewView
     private lateinit var linearLayout: FrameLayout
     private var cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private var imageCapture: ImageCapture? = null
 
     private lateinit var barcodeScanner: BarcodeScanner
     private var cameraProvider: ProcessCameraProvider? = null
@@ -127,6 +129,11 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
                     }
                 }
 
+            imageCapture = ImageCapture.Builder()
+                .setTargetAspectRatio(AspectRatio.RATIO_16_9)
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .build()
+
             // Select the back camera as default
 //            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
@@ -139,12 +146,30 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
                     lifecycleOwner,
                     cameraSelector!!,
                     preview,
+                    imageCapture,
                     imageAnalysis
                 )
             } catch (exc: Exception) {
                 Log.e("CameraX", "Use case binding failed", exc)
             }
         }, ContextCompat.getMainExecutor(context))
+    }
+
+    private fun takePicture(result: MethodChannel.Result) {
+        val file = File(context.cacheDir, "captured_image_${System.currentTimeMillis()}.jpg")
+
+        val outputOptions = ImageCapture.OutputFileOptions.Builder(file).build()
+
+        imageCapture?.takePicture(outputOptions, ContextCompat.getMainExecutor(context),
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                    result.success(file.absolutePath) // Return image path to Flutter
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    result.error("IMAGE_CAPTURE_FAILED", "Failed to capture image", exception.message)
+                }
+            })
     }
 
 
@@ -162,7 +187,6 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
 
 
     // Process each frame for barcode scanning
-    @OptIn(ExperimentalGetImage::class)
     private fun processImageProxy(imageProxy: ImageProxy) {
 
         val mediaImage = imageProxy.image
@@ -221,10 +245,9 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
 
             "pauseCamera" -> pauseCamera(result)
             "resumeCamera" -> resumeCamera(result)
-//            "takePicture" -> {
-//                val path = call.argument<String>("path")
-//                takePicture(path, result)
-//            }
+            "takePicture" -> {
+                takePicture(result)
+            }
 
 //            "processImageFromPath" -> {
 //                val imgPath = call.argument<String>("path")

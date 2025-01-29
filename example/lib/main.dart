@@ -122,8 +122,9 @@ class _MyAppState extends State<MyApp> {
                         child: Text("front"),
                       ),
                       TextButton(
-                        onPressed: () {
-                          controller.switchCamera(CameraKitPlusCameraMode.front);
+                        onPressed: () async {
+                          final path = await controller.takePicture();
+                          print(path);
                         },
                         child: Text("take picture"),
                       ),

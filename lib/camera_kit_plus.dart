@@ -27,4 +27,7 @@ class CameraKitPlus {
   Future<bool> getCameraPermission() {
     return CameraKitPlusPlatform.instance.getCameraPermission();
   }
+  Future<String?> takePicture() {
+    return CameraKitPlusPlatform.instance.takePicture();
+  }
 }

@@ -50,4 +50,11 @@ class MethodChannelCameraKitPlus extends CameraKitPlusPlatform {
 
     return permission ?? false;
   }
+
+  @override
+  Future<String?> takePicture() async {
+    final permission = await methodChannel.invokeMethod<String>('takePicture');
+
+    return permission;
+  }
 }

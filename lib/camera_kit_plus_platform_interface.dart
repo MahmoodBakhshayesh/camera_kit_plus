@@ -47,4 +47,8 @@ abstract class CameraKitPlusPlatform extends PlatformInterface {
   Future<bool> getCameraPermission() {
     throw UnimplementedError('getCameraPermissionhas not been implemented.');
   }
+
+  Future<String?> takePicture() {
+    throw UnimplementedError('takePicture not been implemented.');
+  }
 }

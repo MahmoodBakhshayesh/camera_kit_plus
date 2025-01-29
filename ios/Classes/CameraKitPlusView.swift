@@ -10,7 +10,7 @@ import Foundation
 import AVFoundation
 
 
-class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputObjectsDelegate {
+class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputObjectsDelegate, AVCapturePhotoCaptureDelegate {
     private var _view: UIView
 //    private var captureSession: AVCaptureSession?
     var captureSession = AVCaptureSession()
@@ -20,6 +20,8 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
     var initCameraFinished:Bool! = false
     var cameraID = 0
     var hasButton = false
+    private var imageCaptureResult:FlutterResult? = nil
+    var photoOutput: AVCapturePhotoOutput?
 
     
     init(frame: CGRect, messenger: FlutterBinaryMessenger) {
@@ -118,7 +120,7 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
             break
         case "takePicture":
 //            let path = (myArgs?["path"] as! String);
-//            self.takePicture(path:path,flutterResult: result)
+            self.captureImage(result: result)
             break
         case "processImageFromPath":
 //            let path = (myArgs?["path"] as! String);
@@ -158,6 +160,23 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
             UIApplication.shared.open(settingsURL)
             print(settingsURL)
             result(true)
+        }
+    }
+    
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        guard let imageData = photo.fileDataRepresentation() else {
+            self.imageCaptureResult?(FlutterError(code: "IMAGE_CAPTURE_FAILED", message: "Could not get image data", details: nil))
+            return
+        }
+
+        // Save image to disk
+        let filename = UUID().uuidString + ".jpg"
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        do {
+            try imageData.write(to: fileURL)
+            self.imageCaptureResult?(fileURL.path)
+        } catch {
+            self.imageCaptureResult?(FlutterError(code: "SAVE_FAILED", message: "Could not save image", details: nil))
         }
     }
     
@@ -234,13 +253,6 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
     
     private func setupCamera() {
         print("setupCamera")
-        
-
-            
-            // Set the video capture device to the default camera
-            //        self.captureDevice = AVCaptureDevice.default(AVCaptureDevice.DeviceType.builtInWideAngleCamera,for: .video,position: .front)
-            //        setFlashMode(mode: .off)
-            
             let videoInput: AVCaptureDeviceInput
             do {
                 videoInput = try AVCaptureDeviceInput(device:  self.captureDevice)
@@ -271,8 +283,35 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
                 print("Could not add metadata output to session")
                 return
             }
+        
+        
+//        if captureSession.canAddOutput(photoOutput) {
+//            captureSession.addOutput(photoOutput)
+//        } else {
+//            print("Could not add photo output to session")
+//            return
+//        }
+//        
+        AudioServicesDisposeSystemSoundID(1108)
+        photoOutput = AVCapturePhotoOutput()
+        photoOutput?.setPreparedPhotoSettingsArray([AVCapturePhotoSettings(format: [AVVideoCodecKey : AVVideoCodecJPEG])], completionHandler: nil)
+        if captureSession.canAddOutput(photoOutput!){
+            captureSession.addOutput(photoOutput!)
+        }
+        
             startSession(isFirst: true)
        
+    }
+    
+    
+    func captureImage(result: @escaping FlutterResult) {
+        let settings = AVCapturePhotoSettings()
+        settings.flashMode = .auto
+        
+        photoOutput?.capturePhoto(with: settings, delegate: self)
+
+        // Store the result callback to return data later
+        self.imageCaptureResult = result
     }
     
     func pauseCamera(result:  @escaping FlutterResult){
