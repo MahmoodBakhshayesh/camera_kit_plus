@@ -66,7 +66,7 @@ class _MyAppState extends State<MyApp> {
                     controller: controller,
 
                     onBarcodeRead: (String data) {
-                      print(data);
+                      // print(data);
                     },
                     onBarcodeDataRead: (BarcodeData data){
                       print("Barcode Scanned =>${data.getType} -- ${data.value}");

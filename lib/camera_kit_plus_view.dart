@@ -12,9 +12,10 @@ import 'camera_kit_plus_controller.dart';
 class CameraKitPlusView extends StatefulWidget {
   final void Function(String code)? onBarcodeRead;
   final void Function(BarcodeData data)? onBarcodeDataRead;
+  final List<BarcodeType>? types;
   final CameraKitPlusController? controller;
 
-  const CameraKitPlusView({super.key, required this.onBarcodeRead, this.onBarcodeDataRead, this.controller});
+  const CameraKitPlusView({super.key, required this.onBarcodeRead, this.onBarcodeDataRead, this.controller, this.types});
 
   @override
   State<CameraKitPlusView> createState() => _CameraKitPlusViewState();
@@ -140,15 +141,19 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView> {
   Future<dynamic> _methodCallHandler(MethodCall methodCall) async {
     try {
       if (methodCall.method == "onBarcodeScanned") {
-        String barcode = methodCall.arguments.toString();
-        widget.onBarcodeRead?.call(barcode);
+        // String barcode = methodCall.arguments.toString();
+        // widget.onBarcodeRead?.call(barcode);
       }
       if (methodCall.method == "onBarcodeDataScanned") {
         String barcodeJson = methodCall.arguments.toString();
         // print(barcodeJson);
         final dataJson = jsonDecode(barcodeJson);
         BarcodeData data = BarcodeData.fromJson(dataJson);
+        if(widget.types!=null && !widget.types!.map((a)=>a.code).contains(data.type)){
+          return;
+        }
         // print(data.toJson());
+        widget.onBarcodeRead?.call(data.value);
         widget.onBarcodeDataRead?.call(data);
       }
     } catch (e) {
