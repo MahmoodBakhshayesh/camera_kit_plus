@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:app_settings/app_settings.dart';
+// import 'package:app_settings/app_settings.dart';
 import 'package:camera_kit_plus/enums.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -21,14 +21,16 @@ class CameraKitPlusView extends StatefulWidget {
   State<CameraKitPlusView> createState() => _CameraKitPlusViewState();
 }
 
-class _CameraKitPlusViewState extends State<CameraKitPlusView> {
+class _CameraKitPlusViewState extends State<CameraKitPlusView>  with WidgetsBindingObserver {
   static const channel = MethodChannel('camera_kit_plus');
   late CameraKitPlusController controller;
-
+  late VisibilityDetector visibilityDetector;
+  bool paused  = false;
   @override
   void initState() {
     // channel.setMethodCallHandler(_methodCallHandler);
     controller = widget.controller ?? CameraKitPlusController();
+    WidgetsBinding.instance.addObserver(this);
     super.initState();
   }
 
@@ -38,17 +40,47 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        // print("Flutter Life Cycle: resumed");
+        controller.resumeCamera();
+        break;
+      case AppLifecycleState.inactive:
+        // print("Flutter Life Cycle: inactive");
+        if (Platform.isIOS) {
+          controller.pauseCamera();
+        }
+        break;
+      case AppLifecycleState.paused:
+        // print("Flutter Life Cycle: paused");
+        controller.pauseCamera();
+        break;
+      default:
+        break;
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    controller.pauseCamera();
+    super.dispose();
+  }
+
+
+  @override
   Widget build(BuildContext context) {
 
     return VisibilityDetector(
       key: const Key('camera-kit-plus-view'),
       onVisibilityChanged: _onVisibilityChanged,
       child: Platform.isAndroid
-          ? AndroidView(
+          ? paused?SizedBox():AndroidView(
         viewType: 'camera-kit-plus-view',
         onPlatformViewCreated: _onPlatformViewCreated,
       )
-          : UiKitView(
+          :  paused?SizedBox():UiKitView(
         viewType: 'camera-kit-plus-view',
         onPlatformViewCreated: _onPlatformViewCreated,
       ),
@@ -168,11 +200,19 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView> {
   void _onVisibilityChanged(VisibilityInfo info) {
     bool isVisible = !(info.visibleFraction == 0);
     if (isVisible) {
-      print("object visible");
-      controller.resumeCamera();
+      // print("object visible");
+      paused = false;
+      if(mounted) {
+        setState(() {});
+      }
+      // controller.resumeCamera();
     } else {
-      print("object not visible");
-      controller.pauseCamera();
+      paused = true;
+      if(mounted) {
+        setState(() {});
+      }
+      // print("object not visible");
+      // controller.pauseCamera();
     }
   }
 }

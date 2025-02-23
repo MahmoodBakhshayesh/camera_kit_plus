@@ -14,7 +14,8 @@ class CameraKitOcrPlusViewFactory: NSObject, FlutterPlatformViewFactory {
     }
 
     func create(withFrame frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?) -> FlutterPlatformView {
-        return CameraKitOcrPlusView(frame: frame, messenger: messenger)
+//        return CameraKitOcrPlusView(frame: frame, messenger: messenger)
+        return CameraKitOcrView(frame: frame, viewIdentifier: 1, arguments: nil, binaryMessenger: messenger)
     }
 }
 

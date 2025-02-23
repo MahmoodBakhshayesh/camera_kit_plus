@@ -21,7 +21,7 @@ class _MyAppState extends State<MyApp> {
   String _platformVersion = 'Unknown';
   final _cameraKitPlusPlugin = CameraKitPlus();
   CameraKitPlusController controller = CameraKitPlusController();
-
+  bool show = true;
   @override
   void initState() {
     super.initState();
@@ -61,8 +61,8 @@ class _MyAppState extends State<MyApp> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              true? Expanded(
-                  child: CameraKitPlusView(
+              false? Expanded(
+                  child: show?CameraKitPlusView(
                     controller: controller,
 
                     onBarcodeRead: (String data) {
@@ -71,7 +71,7 @@ class _MyAppState extends State<MyApp> {
                     onBarcodeDataRead: (BarcodeData data){
                       print("Barcode Scanned =>${data.getType} -- ${data.value}");
                     },
-                  )):
+                  ):SizedBox()):
               Expanded(
                   child: CameraKitOcrPlusView(
                 controller: controller,
@@ -115,18 +115,28 @@ class _MyAppState extends State<MyApp> {
                         },
                         child: Text("back"),
                       ),
-                      TextButton(
-                        onPressed: () {
-                          controller.switchCamera(CameraKitPlusCameraMode.front);
-                        },
-                        child: Text("front"),
-                      ),
+                      // TextButton(
+                      //   onPressed: () {
+                      //     controller.switchCamera(CameraKitPlusCameraMode.front);
+                      //   },
+                      //   child: Text("front"),
+                      // ),
                       TextButton(
                         onPressed: () async {
                           final path = await controller.takePicture();
                           print(path);
                         },
                         child: Text("take picture"),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          show = false;
+                          setState((){});
+                          await Future.delayed(Duration(seconds: 1 ));
+                          show = true;
+                          setState((){});
+                        },
+                        child: Text("reload"),
                       ),
                     ],
                   ),

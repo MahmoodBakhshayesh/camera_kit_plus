@@ -13,7 +13,6 @@ import android.widget.LinearLayout
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -75,6 +74,8 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
             setupPreview()
         }
     }
+
+
 
 
     private fun setupPreview() {
@@ -144,13 +145,15 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
             preview = Preview.Builder().setTargetAspectRatio(AspectRatio.RATIO_16_9).setTargetRotation(previewView.rotation.toInt()).build()
             preview!!.setSurfaceProvider(previewView.surfaceProvider)
             try {
-                camera = cameraProvider?.bindToLifecycle(
-                    lifecycleOwner,
-                    cameraSelector!!,
-                    preview,
-                    imageCapture,
-                    imageAnalysis
-                )
+                camera = cameraSelector?.let {
+                    cameraProvider?.bindToLifecycle(
+                        lifecycleOwner,
+                        it,
+                        preview,
+                        imageCapture,
+                        imageAnalysis
+                    )
+                }
             } catch (exc: Exception) {
                 Log.e("CameraX", "Use case binding failed", exc)
             }
@@ -276,6 +279,7 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
     }
 
     private fun resumeCamera(result: MethodChannel.Result) {
+        setupCameraSelector();
         setupCamera()
     }
 

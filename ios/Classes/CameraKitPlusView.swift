@@ -45,7 +45,7 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
         // Set the button's title
         button.setTitle("Need Camera Permission!", for: .normal)
         button.setTitleColor(.white, for: .normal)
-        button.backgroundColor = UIColor.systemBlue
+        button.backgroundColor = UIColor.black
         button.layer.cornerRadius = 8
 
         // Set the button's size and position
@@ -217,11 +217,11 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
                     var previewLayer = AVCaptureVideoPreviewLayer(session: self.captureSession)
                     previewLayer.videoGravity = .resizeAspectFill  // This makes the preview take up all available space
                     previewLayer.frame = self._view.layer.bounds  // Set the preview layer to match the view's bounds
-                    previewLayer.backgroundColor = UIColor.green.cgColor  // For debugging purposes
+                    previewLayer.backgroundColor = UIColor.black.cgColor  // For debugging purposes
                     self._view.layer.addSublayer(previewLayer)
                     self.captureSession.startRunning()
                 }else{
-                    self.addButtonToView()
+//                    self.addButtonToView()
                     DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
                         self.startSession(isFirst: isFirst)
                     }
@@ -229,7 +229,7 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
                 
               
             } else {
-                self.addButtonToView()
+//                self.addButtonToView()
                 DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
                     self.startSession(isFirst: isFirst)
                 }
@@ -243,8 +243,10 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
         case .authorized:
             return true
         case .notDetermined:
+            self.addButtonToView()
             return false
         case .denied, .restricted:
+            self.addButtonToView()
             return false
         @unknown default:
             return false

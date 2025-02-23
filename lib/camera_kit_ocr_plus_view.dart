@@ -16,10 +16,10 @@ class CameraKitOcrPlusView extends StatefulWidget {
   State<CameraKitOcrPlusView> createState() => _CameraKitOcrPlusViewState();
 }
 
-class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView> {
+class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView>  with WidgetsBindingObserver{
   static const channel = MethodChannel('camera_kit_plus');
   late CameraKitPlusController controller;
-
+  bool paused = false;
   @override
   void initState() {
     // channel.setMethodCallHandler(_methodCallHandler);
@@ -33,15 +33,44 @@ class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView> {
       key: const Key('camera-kit-ocr-plus-view'),
       onVisibilityChanged: _onVisibilityChanged,
       child: Platform.isAndroid
-          ? AndroidView(
+          ? paused?SizedBox():AndroidView(
               viewType: 'camera-kit-ocr-plus-view',
               onPlatformViewCreated: _onPlatformViewCreated,
             )
-          : UiKitView(
+          : paused?SizedBox():UiKitView(
               viewType: 'camera-kit-ocr-plus-view',
               onPlatformViewCreated: _onPlatformViewCreated,
             ),
     );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+      // print("Flutter Life Cycle: resumed");
+        controller.resumeCamera();
+        break;
+      case AppLifecycleState.inactive:
+      // print("Flutter Life Cycle: inactive");
+        if (Platform.isIOS) {
+          controller.pauseCamera();
+        }
+        break;
+      case AppLifecycleState.paused:
+      // print("Flutter Life Cycle: paused");
+        controller.pauseCamera();
+        break;
+      default:
+        break;
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    controller.pauseCamera();
+    super.dispose();
   }
 
   void _onPlatformViewCreated(int id) {
@@ -59,9 +88,17 @@ class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView> {
   void _onVisibilityChanged(VisibilityInfo info) {
     bool isVisible = !(info.visibleFraction == 0);
     if (isVisible) {
-      controller.resumeCamera();
+      // controller.resumeCamera();
+      paused = false;
+      if(mounted) {
+        setState(() {});
+      }
     } else {
-      controller.pauseCamera();
+      paused = true;
+      if(mounted) {
+        setState(() {});
+      }
+      // controller.pauseCamera();
     }
   }
 }
