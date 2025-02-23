@@ -5,6 +5,7 @@ homepage: https://github.com/MahmoodBakhshayesh/camera_kit_plus
 
 environment:
   sdk: ^3.5.0
+
   flutter: '>=3.3.0'
 
 dependencies:
