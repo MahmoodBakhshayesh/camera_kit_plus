@@ -62,9 +62,31 @@ android {
         implementation "androidx.camera:camera-extensions:$camerax_version"
 
         // ML Kit barcode scanning dependency
-        implementation 'com.google.mlkit:barcode-scanning:17.0.3'
+        implementation 'com.google.mlkit:barcode-scanning:16.1.1'
         implementation 'com.google.mlkit:text-recognition:16.0.1'
+
+//        implementation('com.google.mlkit:barcode-scanning:16.1.1') {
+//            exclude group: 'com.google.mlkit', module: 'common'
+//            exclude group: 'com.google.mlkit', module: 'vision-common'
+//        }
+//        implementation('com.google.mlkit:text-recognition:16.0.1') {
+//            exclude group: 'com.google.mlkit', module: 'common'
+//            exclude group: 'com.google.mlkit', module: 'vision-common'
+//        }
+//
+//        implementation 'com.google.mlkit:common:18.11.0'  // Add latest compatible version
+//        implementation 'com.google.mlkit:vision-common:17.3.0'
+//
+//        configurations.all {
+//            resolutionStrategy {
+//                force 'com.google.mlkit:common:16.3.2'
+//                force 'com.google.mlkit:vision-common:16.3.2'
+//            }
+//        }
+
+
         implementation 'com.google.code.gson:gson:2.8.6'
+
 
     }
 

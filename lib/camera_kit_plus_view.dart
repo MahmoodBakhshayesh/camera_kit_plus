@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 // import 'package:app_settings/app_settings.dart';
 import 'package:camera_kit_plus/enums.dart';
+// import 'package:camerakit/CameraKitView.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -14,8 +15,9 @@ class CameraKitPlusView extends StatefulWidget {
   final void Function(BarcodeData data)? onBarcodeDataRead;
   final List<BarcodeType>? types;
   final CameraKitPlusController? controller;
+  final bool useOld;
 
-  const CameraKitPlusView({super.key, required this.onBarcodeRead, this.onBarcodeDataRead, this.controller, this.types});
+  const CameraKitPlusView({super.key, required this.onBarcodeRead, this.onBarcodeDataRead, this.controller, this.types, this.useOld = false});
 
   @override
   State<CameraKitPlusView> createState() => _CameraKitPlusViewState();
@@ -71,7 +73,11 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView>  with WidgetsBind
 
   @override
   Widget build(BuildContext context) {
-
+    // if(widget.useOld){
+    //   return CameraKitView(
+    //     onBarcodeRead: widget.onBarcodeRead,
+    //   );
+    // }
     return VisibilityDetector(
       key: const Key('camera-kit-plus-view'),
       onVisibilityChanged: _onVisibilityChanged,
