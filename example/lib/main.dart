@@ -61,9 +61,10 @@ class _MyAppState extends State<MyApp> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              false? Expanded(
+              true? Expanded(
                   child: show?CameraKitPlusView(
                     controller: controller,
+
 
                     onBarcodeRead: (String data) {
                       // print(data);

@@ -34,10 +34,11 @@ import android.widget.LinearLayout
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.abomis.camera_kit_plus.Classes.BarcodeDetector
+import com.google.mlkit.vision.barcode.Barcode
 import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
+//import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
