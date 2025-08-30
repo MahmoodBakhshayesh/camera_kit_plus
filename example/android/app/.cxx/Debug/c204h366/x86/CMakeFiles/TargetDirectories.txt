@@ -1,0 +1,2 @@
+/Users/fps/Desktop/FlutterProjects/camera_kit_plus/example/android/app/.cxx/Debug/c204h366/x86/CMakeFiles/edit_cache.dir
+/Users/fps/Desktop/FlutterProjects/camera_kit_plus/example/android/app/.cxx/Debug/c204h366/x86/CMakeFiles/rebuild_cache.dir

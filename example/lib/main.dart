@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:camera_kit_plus/camera_kit_plus_controller.dart';
 import 'package:camera_kit_plus/enums.dart';
 import 'package:flutter/material.dart';
@@ -22,6 +24,7 @@ class _MyAppState extends State<MyApp> {
   final _cameraKitPlusPlugin = CameraKitPlus();
   CameraKitPlusController controller = CameraKitPlusController();
   bool show = true;
+
   @override
   void initState() {
     super.initState();
@@ -61,26 +64,26 @@ class _MyAppState extends State<MyApp> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              true? Expanded(
-                  child: show?CameraKitPlusView(
-                    controller: controller,
-
-
-                    onBarcodeRead: (String data) {
-                      // print(data);
-                    },
-                    onBarcodeDataRead: (BarcodeData data){
-                      print("Barcode Scanned =>${data.getType} -- ${data.value}");
-                    },
-                  ):SizedBox()):
-              Expanded(
-                  child: CameraKitOcrPlusView(
-                controller: controller,
-
-                onTextRead: (OcrData data) {
-                  print(data.toJson());
-                },
-              )),
+              false
+                  ? Expanded(
+                      child: show
+                          ? CameraKitPlusView(
+                              controller: controller,
+                              onBarcodeRead: (String data) {
+                                // print(data);
+                              },
+                              onBarcodeDataRead: (BarcodeData data) {
+                                print("Barcode Scanned =>${data.getType} -- ${data.value}");
+                              },
+                            )
+                          : SizedBox())
+                  : Expanded(
+                      child: CameraKitOcrPlusView(
+                      controller: controller,
+                      onTextRead: (OcrData data) {
+                        log(data.text);
+                      },
+                    )),
               Expanded(
                 child: Container(
                   color: Colors.red,
@@ -111,10 +114,12 @@ class _MyAppState extends State<MyApp> {
                         child: Text("on"),
                       ),
                       TextButton(
-                        onPressed: () {
-                          controller.switchCamera(CameraKitPlusCameraMode.back);
+                        onPressed: () async {
+                          // controller.switchCamera(CameraKitPlusCameraMode.back);
+                         final zoomres = await controller.setZoom(3.9);
+                         log("zoomres ${zoomres}");
                         },
-                        child: Text("back"),
+                        child: Text("zoom"),
                       ),
                       // TextButton(
                       //   onPressed: () {
@@ -132,10 +137,10 @@ class _MyAppState extends State<MyApp> {
                       TextButton(
                         onPressed: () async {
                           show = false;
-                          setState((){});
-                          await Future.delayed(Duration(seconds: 1 ));
+                          setState(() {});
+                          await Future.delayed(Duration(seconds: 1));
                           show = true;
-                          setState((){});
+                          setState(() {});
                         },
                         child: Text("reload"),
                       ),

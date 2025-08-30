@@ -35,6 +35,13 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     
     /// 0:camera 1:barcodeScanner 2:ocrReader
     var usageMode:Int = 0
+    private var minZoomFactor: CGFloat = 1.0
+    private var lastZoomFactor: CGFloat = 1.0
+    private var maxZoomFactor: CGFloat {
+        // Cap practical zoom to 8x to avoid ugly noise; raise if you want
+        return min(self.captureDevice?.activeFormat.videoMaxZoomFactor ?? 1.0, 8.0)
+    }
+
     
     init(
         frame: CGRect,
@@ -60,6 +67,8 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             self.previewView = UIView(frame: frame)
             //            previewView.contentMode = UIView.ContentMode.scaleAspectFill
         }
+        previewView.isUserInteractionEnabled = true
+        attachZoomGesturesIfNeeded()
         return previewView
     }
     
@@ -94,8 +103,8 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             break
         case "changeFlashMode":
             let flashModeID = (myArgs?["flashModeID"] as! Int);
-            self.setFlashMode(flashMode: flashModeID)
-            self.changeFlashMode()
+//            self.setFlashMode(flashMode: flashModeID)
+//            self.changeFlashMode()
             break
         case "changeCameraVisibility":
             let visibility = (myArgs?["visibility"] as! Bool)
@@ -114,6 +123,16 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         case "dispose":
             self.getCameraPermission(flutterResult: result)
             break
+        case "setZoom":
+            if let z = myArgs?["zoom"] as? Double {
+                self.setZoom(factor: CGFloat(z), animated: true)
+                result(true)
+            } else {
+                result(FlutterError(code: "bad_args", message: "zoom (Double) required", details: nil))
+            }
+        case "resetZoom":
+            self.setZoom(factor: 1.0, animated: true)
+            result(true)
         default:
             result(false)
         }
@@ -155,7 +174,7 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         self.isFillScale = fill
         self.cameraPosition = cameraID == 0 ? .back : .front
         var myBarcodeMode: Int
-        setFlashMode(flashMode: flashMode)
+//        setFlashMode(flashMode: flashMode)
         textRecognizer = TextRecognizer.textRecognizer()
         self.setupAVCapture()
     }
@@ -173,7 +192,7 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         
         
         beginSession()
-        changeFlashMode()
+//        changeFlashMode()
     }
     
     func beginSession(isFirst: Bool = true){
@@ -190,6 +209,8 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             if self.session.canAddInput(deviceInput){
                 self.session.addInput(deviceInput)
             }
+            lastZoomFactor = 1.0
+
             
             orientation = imageOrientation(
                 fromDevicePosition: cameraPosition
@@ -265,33 +286,24 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         }
     }
     
-    func setFlashMode(flashMode: Int) {
-        if flashMode == 2 {
-            self.flashMode = .auto
-        } else if flashMode == 1 {
-            self.flashMode = .on
-        } else if flashMode == 0{
-            self.flashMode = .off
-        }
+    func setFlashMode(mode: AVCaptureDevice.TorchMode){
+
+//        do{
+//            if (captureDevice.hasFlash && self.cameraID == 0)
+//            {
+//                try captureDevice.lockForConfiguration()
+//                captureDevice.torchMode = mode
+////                    captureDevice.flashMode = (modeID == 2) ?(.auto):(modeID == 1 ? (.on) : (.off))
+//                captureDevice.unlockForConfiguration()
+//            }
+//        }catch{
+//            print("Device tourch Flash Error ");
+//        }
     }
-    
-    func changeFlashMode() {
-        
-        if(self.usageMode>0) {
-            do{
-                if (captureDevice.hasFlash)
-                {
-                    try captureDevice.lockForConfiguration()
-                    captureDevice.torchMode = (self.flashMode == .auto) ?(.auto):(self.flashMode == .on ? (.on) : (.off))
-                    captureDevice.flashMode = self.flashMode
-                    captureDevice.unlockForConfiguration()
-                }
-            }catch{
-                //DISABEL FLASH BUTTON HERE IF ERROR
-                print("Device tourch Flash Error ");
-            }
-            
-        }
+
+    func changeFlashMode(modeID: Int,result:  @escaping FlutterResult){
+        setFlashMode(mode: (modeID == 2) ?(.auto):(modeID == 1 ? (.on) : (.off)))
+        result(true)
     }
     
     func pauseCamera() {
@@ -616,7 +628,72 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     }
     
     
-    
+    private func attachZoomGesturesIfNeeded() {
+        // Avoid adding duplicates on hot-reload / rebuilds
+        if let grs = previewView.gestureRecognizers, grs.isEmpty == false { return }
+
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        previewView.addGestureRecognizer(pinch)
+
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTapResetZoom))
+        doubleTap.numberOfTapsRequired = 2
+        previewView.addGestureRecognizer(doubleTap)
+    }
+    @objc private func handlePinch(_ pinch: UIPinchGestureRecognizer) {
+        guard let device = self.captureDevice else { return }
+
+        switch pinch.state {
+        case .began:
+            lastZoomFactor = device.videoZoomFactor
+
+        case .changed:
+            var newFactor = lastZoomFactor * pinch.scale
+            newFactor = max(minZoomFactor, min(newFactor, maxZoomFactor))
+            do {
+                try device.lockForConfiguration()
+                device.videoZoomFactor = newFactor
+                device.unlockForConfiguration()
+            } catch {
+                print("Zoom lock error: \(error)")
+            }
+
+        case .ended, .cancelled, .failed:
+            // Clamp & optionally smooth
+            let target = max(minZoomFactor, min(device.videoZoomFactor, maxZoomFactor))
+            do {
+                try device.lockForConfiguration()
+                device.ramp(toVideoZoomFactor: target, withRate: 8.0) // smooth snap
+                device.unlockForConfiguration()
+            } catch {
+                print("Zoom end error: \(error)")
+            }
+            lastZoomFactor = target
+
+        default: break
+        }
+    }
+
+    @objc private func handleDoubleTapResetZoom() {
+        setZoom(factor: 1.0, animated: true)
+    }
+    private func setZoom(factor: CGFloat, animated: Bool = true) {
+        guard let device = self.captureDevice else { return }
+        let clamped = max(minZoomFactor, min(factor, maxZoomFactor))
+        do {
+            try device.lockForConfiguration()
+            if animated {
+                device.ramp(toVideoZoomFactor: clamped, withRate: 8.0)
+            } else {
+                device.videoZoomFactor = clamped
+            }
+            device.unlockForConfiguration()
+            lastZoomFactor = clamped
+        } catch {
+            print("setZoom error: \(error)")
+        }
+    }
+
+
     
     
     

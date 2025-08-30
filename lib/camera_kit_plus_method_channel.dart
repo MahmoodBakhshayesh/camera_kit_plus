@@ -30,17 +30,13 @@ class MethodChannelCameraKitPlus extends CameraKitPlusPlatform {
 
   @override
   Future<bool> changeFlashMode(CameraKitPlusFlashMode mode) async {
-    final version = await methodChannel.invokeMethod<bool>('changeFlashMode', {
-      "flashModeID":mode.index
-    });
+    final version = await methodChannel.invokeMethod<bool>('changeFlashMode', {"flashModeID": mode.index});
     return version ?? false;
   }
 
   @override
   Future<bool> switchCamera(CameraKitPlusCameraMode mode) async {
-    final version = await methodChannel.invokeMethod<bool>('switchCamera', {
-      "cameraID":mode.index
-    });
+    final version = await methodChannel.invokeMethod<bool>('switchCamera', {"cameraID": mode.index});
     return version ?? false;
   }
 
@@ -56,5 +52,12 @@ class MethodChannelCameraKitPlus extends CameraKitPlusPlatform {
     final permission = await methodChannel.invokeMethod<String>('takePicture');
 
     return permission;
+  }
+
+  @override
+  Future<bool?> setZoom(double zoom) async {
+    final zoomChange = await methodChannel.invokeMethod<bool>('setZoom', {"zoom": zoom});
+
+    return zoomChange;
   }
 }

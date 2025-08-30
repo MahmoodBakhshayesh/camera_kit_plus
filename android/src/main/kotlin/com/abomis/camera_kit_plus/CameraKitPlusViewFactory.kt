@@ -1,7 +1,7 @@
 package com.abomis.camera_kit_plus
 
 import CameraKitPlusView
-import CameraView2
+//import CameraView2
 import android.content.Context
 import android.util.Log
 import androidx.camera.lifecycle.ProcessCameraProvider

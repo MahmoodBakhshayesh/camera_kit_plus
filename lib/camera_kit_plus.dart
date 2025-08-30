@@ -30,4 +30,7 @@ class CameraKitPlus {
   Future<String?> takePicture() {
     return CameraKitPlusPlatform.instance.takePicture();
   }
+  Future<bool?> setZoom(double zoom) {
+    return CameraKitPlusPlatform.instance.setZoom(zoom);
+  }
 }

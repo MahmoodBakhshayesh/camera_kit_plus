@@ -14,17 +14,29 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
     var initCameraFinished: Bool! = false
     var cameraID = 0
     var textRecognizer: TextRecognizer
+    
+    private var minZoomFactor: CGFloat = 1.0
+    private var lastZoomFactor: CGFloat = 1.0
+    private var maxZoomFactor: CGFloat {
+        // Cap to something reasonable for quality; you can raise it if you want
+        return min(self.captureDevice?.activeFormat.videoMaxZoomFactor ?? 1.0, 8.0)
+    }
 
     init(frame: CGRect, messenger: FlutterBinaryMessenger) {
         _view = UIView(frame: frame)
         _view.backgroundColor = UIColor.black
+        _view.isUserInteractionEnabled = true
+        
         textRecognizer = TextRecognizer.textRecognizer() // Initialize the text recognizer
         super.init()
+        attachZoomGesturesIfNeeded()
         setupAVCapture()
         setupCamera()
         channel = FlutterMethodChannel(name: "camera_kit_plus", binaryMessenger: messenger)
         channel?.setMethodCallHandler(handle)
     }
+    
+   
     
     private func createNativeView() {
         let screenSize = UIScreen.main.bounds
@@ -62,6 +74,16 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
         case "resumeCamera":
             self.resumeCamera(result: result)
             break
+        case "setZoom":
+              if let z = myArgs?["zoom"] as? Double {
+                  self.setZoom(factor: CGFloat(z), animated: true)
+                  result(true)
+              } else {
+                  result(FlutterError(code: "bad_args", message: "zoom (double) is required", details: nil))
+              }
+        case "resetZoom":
+              self.setZoom(factor: 1.0, animated: true)
+              result(true)
         default:
             result(false)
         }
@@ -85,6 +107,8 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
         
         // Initialize the capture device
         captureDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+        lastZoomFactor = 1.0
+
         if captureDevice == nil {
             print("Error: captureDevice is nil.")
             return
@@ -247,6 +271,75 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
 //        let json = String(data: jsonData, encoding: String.Encoding.utf8)
 //        flutterResultOcr(json)
 //    }
+    
+    
+    private func attachZoomGesturesIfNeeded() {
+        guard _view.gestureRecognizers?.isEmpty ?? true else { return }
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        _view.addGestureRecognizer(pinch)
+
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTapResetZoom))
+        doubleTap.numberOfTapsRequired = 2
+        _view.addGestureRecognizer(doubleTap)
+    }
+    
+    @objc private func handlePinch(_ pinch: UIPinchGestureRecognizer) {
+        guard let device = self.captureDevice else { return }
+        switch pinch.state {
+        case .began:
+            lastZoomFactor = device.videoZoomFactor
+        case .changed:
+            // Compute new factor from the pinch scale
+            var newFactor = lastZoomFactor * pinch.scale
+            newFactor = max(minZoomFactor, min(newFactor, maxZoomFactor))
+            do {
+                try device.lockForConfiguration()
+                device.videoZoomFactor = newFactor
+                device.unlockForConfiguration()
+            } catch {
+                print("Zoom lock error: \(error)")
+            }
+        case .ended, .cancelled, .failed:
+            // Optionally smooth to a clamped value at the end
+            let target = max(minZoomFactor, min(device.videoZoomFactor, maxZoomFactor))
+            do {
+                try device.lockForConfiguration()
+                if device.responds(to: #selector(setter: AVCaptureDevice.videoZoomFactor)) {
+                    // Smooth ramp (0.2s approx) if supported
+                    device.ramp(toVideoZoomFactor: target, withRate: 8.0)
+                } else {
+                    device.videoZoomFactor = target
+                }
+                device.unlockForConfiguration()
+            } catch {
+                print("Zoom end lock error: \(error)")
+            }
+            lastZoomFactor = target
+        default:
+            break
+        }
+    }
+
+    @objc private func handleDoubleTapResetZoom() {
+        setZoom(factor: 1.0, animated: true)
+    }
+    
+    private func setZoom(factor: CGFloat, animated: Bool = true) {
+        guard let device = self.captureDevice else { return }
+        let clamped = max(minZoomFactor, min(factor, maxZoomFactor))
+        do {
+            try device.lockForConfiguration()
+            if animated {
+                device.ramp(toVideoZoomFactor: clamped, withRate: 8.0)
+            } else {
+                device.videoZoomFactor = clamped
+            }
+            device.unlockForConfiguration()
+            lastZoomFactor = clamped
+        } catch {
+            print("setZoom error: \(error)")
+        }
+    }
 }
 
 

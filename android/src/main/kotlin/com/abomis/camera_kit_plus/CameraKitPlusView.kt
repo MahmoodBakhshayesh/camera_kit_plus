@@ -10,11 +10,9 @@ import android.util.Log
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import androidx.annotation.OptIn
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -27,11 +25,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.abomis.camera_kit_plus.Classes.BarcodeData
 import com.google.gson.Gson
-import com.google.mlkit.vision.barcode.Barcode
 import com.google.mlkit.vision.barcode.BarcodeScanner
-//import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
@@ -56,6 +53,11 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
 
     private var preview: Preview? = null
     val REQUEST_CAMERA_PERMISSION = 1001
+
+    private val barcodeTimestamps = mutableMapOf<String, MutableList<Long>>()
+    private val detectionWindowMs = 200L
+    private val detectionThreshold = 4
+
 
     init {
         linearLayout = getActivity(context)?.let { FrameLayout(it) }!!
@@ -193,30 +195,75 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) : FrameLay
         return null
     }
 
-
-    // Process each frame for barcode scanning
-    @OptIn(ExperimentalGetImage::class)
+    //new
     private fun processImageProxy(imageProxy: ImageProxy) {
-
         val mediaImage = imageProxy.image
         if (mediaImage != null) {
             val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+            val currentTime = System.currentTimeMillis()
+
             barcodeScanner.process(image)
                 .addOnSuccessListener { barcodes ->
                     for (barcode in barcodes) {
-                        methodChannel.invokeMethod("onBarcodeScanned", "${barcode.rawValue}")
-                        methodChannel.invokeMethod("onBarcodeDataScanned", Gson().toJson(BarcodeData(barcode)))
+                        val rawValue = barcode.rawValue ?: continue
+                        val format = barcode.format
 
+                        if (format == Barcode.FORMAT_ITF) {
+                            // Time-based debouncing for ITF barcodes
+                            val timestamps = barcodeTimestamps.getOrPut(rawValue) { mutableListOf() }
+
+                            timestamps.add(currentTime)
+                            timestamps.retainAll { currentTime - it <= detectionWindowMs }
+
+                            if (timestamps.size >= detectionThreshold) {
+                                methodChannel.invokeMethod("onBarcodeScanned", rawValue)
+                                methodChannel.invokeMethod("onBarcodeDataScanned", Gson().toJson(BarcodeData(barcode)))
+                                barcodeTimestamps.remove(rawValue)
+                            }
+                        } else {
+                            // Immediately send non-ITF barcodes
+                            methodChannel.invokeMethod("onBarcodeScanned", rawValue)
+                            methodChannel.invokeMethod("onBarcodeDataScanned", Gson().toJson(BarcodeData(barcode)))
+                        }
+                    }
+
+                    // Cleanup stale ITF entries
+                    val now = System.currentTimeMillis()
+                    barcodeTimestamps.entries.removeIf { (_, times) ->
+                        times.all { now - it > detectionWindowMs }
                     }
                 }
                 .addOnFailureListener {
                     Log.e("Barcode", "Failed to scan barcode", it)
                 }
                 .addOnCompleteListener {
-                    imageProxy.close() // Make sure to close the image proxy
+                    imageProxy.close()
                 }
         }
     }
+
+    // Process each frame for barcode scanning
+//    private fun processImageProxy(imageProxy: ImageProxy) {
+//
+//        val mediaImage = imageProxy.image
+//        if (mediaImage != null) {
+//            val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+//            barcodeScanner.process(image)
+//                .addOnSuccessListener { barcodes ->
+//                    for (barcode in barcodes) {
+//                        methodChannel.invokeMethod("onBarcodeScanned", "${barcode.rawValue}")
+//                        methodChannel.invokeMethod("onBarcodeDataScanned", Gson().toJson(BarcodeData(barcode)))
+//
+//                    }
+//                }
+//                .addOnFailureListener {
+//                    Log.e("Barcode", "Failed to scan barcode", it)
+//                }
+//                .addOnCompleteListener {
+//                    imageProxy.close() // Make sure to close the image proxy
+//                }
+//        }
+//    }
 
     override fun getView(): FrameLayout {
         return linearLayout

@@ -308,7 +308,9 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
     
     func captureImage(result: @escaping FlutterResult) {
         let settings = AVCapturePhotoSettings()
-        settings.flashMode = .auto
+        if photoOutput?.supportedFlashModes.contains(.auto) == true {
+            settings.flashMode = .auto
+        }
         
         photoOutput?.capturePhoto(with: settings, delegate: self)
 

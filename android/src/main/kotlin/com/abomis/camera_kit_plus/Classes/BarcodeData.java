@@ -2,7 +2,7 @@ package com.abomis.camera_kit_plus.Classes;
 import android.graphics.Point;
 
 import com.google.gson.annotations.SerializedName;
-import com.google.mlkit.vision.barcode.Barcode;
+import com.google.mlkit.vision.barcode.common.Barcode;
 
 import java.util.ArrayList;
 import java.util.Arrays;
