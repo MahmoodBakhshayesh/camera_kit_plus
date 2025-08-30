@@ -55,4 +55,13 @@ abstract class CameraKitPlusPlatform extends PlatformInterface {
   Future<bool?> setZoom(double zoom) {
     throw UnimplementedError('takePicture not been implemented.');
   }
+
+  Future<bool?> setOcrRotation(int degree) {
+    throw UnimplementedError('takePicture not been implemented.');
+  }
+
+  Future<bool?> clearOcrRotation() {
+    throw UnimplementedError('takePicture not been implemented.');
+  }
+
 }

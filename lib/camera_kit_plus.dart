@@ -33,4 +33,13 @@ class CameraKitPlus {
   Future<bool?> setZoom(double zoom) {
     return CameraKitPlusPlatform.instance.setZoom(zoom);
   }
+  Future<bool?> setOcrRotation(int degree) {
+    return CameraKitPlusPlatform.instance.setOcrRotation(degree);
+  }
+  Future<bool?> clearOcrRotation() {
+    return CameraKitPlusPlatform.instance.clearOcrRotation();
+  }
+
+  // await channel.invokeMethod('setOcrRotation', {'degrees': 90}); // rotate CW 90°
+  // await channel.invokeMethod('clearOcrRotation');
 }

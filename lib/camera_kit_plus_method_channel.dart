@@ -49,7 +49,7 @@ class MethodChannelCameraKitPlus extends CameraKitPlusPlatform {
 
   @override
   Future<String?> takePicture() async {
-    final permission = await methodChannel.invokeMethod<String>('takePicture');
+    final permission = await methodChannel.invokeMethod<String>('takePicture',{'path':''});
 
     return permission;
   }
@@ -60,4 +60,21 @@ class MethodChannelCameraKitPlus extends CameraKitPlusPlatform {
 
     return zoomChange;
   }
+
+  @override
+  Future<bool?> setOcrRotation(int degrees) async {
+    final zoomChange = await methodChannel.invokeMethod<bool>('setOcrRotation', {"degrees": degrees});
+
+    return zoomChange;
+  }
+
+  @override
+  Future<bool?> clearOcrRotation() async {
+    final zoomChange = await methodChannel.invokeMethod<bool>('clearOcrRotation');
+
+    return zoomChange;
+  }
+
+// await channel.invokeMethod('setOcrRotation', {'degrees': 90}); // rotate CW 90°
+// await channel.invokeMethod('clearOcrRotation');
 }

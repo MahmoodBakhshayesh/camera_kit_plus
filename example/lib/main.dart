@@ -81,7 +81,7 @@ class _MyAppState extends State<MyApp> {
                       child: CameraKitOcrPlusView(
                       controller: controller,
                       onTextRead: (OcrData data) {
-                        log(data.text);
+                        // log(data.text);
                       },
                     )),
               Expanded(
@@ -116,10 +116,11 @@ class _MyAppState extends State<MyApp> {
                       TextButton(
                         onPressed: () async {
                           // controller.switchCamera(CameraKitPlusCameraMode.back);
-                         final zoomres = await controller.setZoom(3.9);
-                         log("zoomres ${zoomres}");
+                         final roateta = await controller.setOcrRotation(270);
+                         log("roateta ${roateta}");
                         },
-                        child: Text("zoom"),
+                        child: Text("rotate"),
+
                       ),
                       // TextButton(
                       //   onPressed: () {
@@ -129,8 +130,14 @@ class _MyAppState extends State<MyApp> {
                       // ),
                       TextButton(
                         onPressed: () async {
-                          final path = await controller.takePicture();
-                          print(path);
+                          try {
+                            final path = await controller.takePicture();
+                            log("${path}");
+
+                          }catch(e){
+                            log("$e");
+
+                          }
                         },
                         child: Text("take picture"),
                       ),

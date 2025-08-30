@@ -41,6 +41,7 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         // Cap practical zoom to 8x to avoid ugly noise; raise if you want
         return min(self.captureDevice?.activeFormat.videoMaxZoomFactor ?? 1.0, 8.0)
     }
+    private var forcedQuarterTurns: Int = 0
 
     
     init(
@@ -132,6 +133,14 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             }
         case "resetZoom":
             self.setZoom(factor: 1.0, animated: true)
+            result(true)
+        case "setOcrRotation": // expects degrees: 0,90,180,270
+            let deg = (myArgs?["degrees"] as? Int) ?? 0
+            let turns = ((deg / 90) % 4 + 4) % 4
+            self.forcedQuarterTurns = turns
+            result(true)
+        case "clearOcrRotation":
+            self.forcedQuarterTurns = 0
             result(true)
         default:
             result(false)
@@ -343,15 +352,45 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     }
     
     
-    func takePicture(path :String,flutterResult:  @escaping FlutterResult){
-        self.imageSavePath = path;
-        self.flutterResultTakePicture = flutterResult;
-        let settings = AVCapturePhotoSettings()
-        if captureDevice.hasFlash {
+    private var isCapturing = false
+
+    func takePicture(path: String, flutterResult: @escaping FlutterResult) {
+        guard let photoOutput = self.photoOutput else {
+            flutterResult(FlutterError(code: "-100", message: "Photo output not configured", details: nil))
+            return
+        }
+        guard !isCapturing else { return } // prevent double-taps
+        isCapturing = true
+
+        self.imageSavePath = path
+        self.flutterResultTakePicture = flutterResult
+
+        // Use JPEG settings explicitly
+        let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+
+        // Flash only if available and supported
+        if captureDevice.isFlashAvailable, photoOutput.supportedFlashModes.contains(self.flashMode) {
             settings.flashMode = self.flashMode
         }
-        photoOutput?.capturePhoto(with: settings, delegate:self)
+
+        // Optional: better quality if you enabled it on the output
+        if photoOutput.isHighResolutionCaptureEnabled {
+            settings.isHighResolutionPhotoEnabled = true
+        }
+
+        // Match the current preview/video orientation so the still isn’t rotated
+        if let conn = photoOutput.connection(with: .video), conn.isVideoOrientationSupported {
+            conn.videoOrientation = previewLayer?.connection?.videoOrientation ?? .portrait
+            if conn.isVideoMirroringSupported {
+                conn.automaticallyAdjustsVideoMirroring = false
+                conn.isVideoMirrored = (cameraPosition == .front)
+            }
+        }
+
+        // Fire
+        photoOutput.capturePhoto(with: settings, delegate: self)
     }
+
     
     func processImageFromPath(path:String,flutterResult:  @escaping FlutterResult){
         let fileURL = URL(fileURLWithPath: path)
@@ -485,22 +524,34 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         }
     }
     
-    public func photoOutput(_ captureOutput: AVCapturePhotoOutput, didFinishProcessingPhoto photoSampleBuffer: CMSampleBuffer?, previewPhoto previewPhotoSampleBuffer: CMSampleBuffer?,
-                            resolvedSettings: AVCaptureResolvedPhotoSettings, bracketSettings: AVCaptureBracketedStillImageSettings?, error: Swift.Error?) {
-        AudioServicesDisposeSystemSoundID(1108)
-        if let error = error { //self.photoCaptureCompletionBlock?(nil, error)
+    func photoOutput(_ output: AVCapturePhotoOutput,
+                     didFinishProcessingPhoto photo: AVCapturePhoto,
+                     error: Error?) {
+        defer { isCapturing = false }
+
+        if let error = error {
             flutterResultTakePicture(FlutterError(code: "-101", message: error.localizedDescription, details: nil))
+            return
         }
-        
-        else if let buffer = photoSampleBuffer, let data = AVCapturePhotoOutput.jpegPhotoDataRepresentation(forJPEGSampleBuffer: buffer, previewPhotoSampleBuffer: nil),
-                let image = UIImage(data: data) {
-            
-            self.saveImage(image: image)
+
+        guard let data = photo.fileDataRepresentation(),
+              let image = UIImage(data: data) else {
+            flutterResultTakePicture(FlutterError(code: "-102", message: "No photo data", details: nil))
+            return
         }
-        
-        else {
-            
-            flutterResultTakePicture(FlutterError(code: "-102", message: "Unknown error", details: nil))
+
+        // Save and resolve the Flutter result (your existing helper)
+        _ = self.saveImage(image: image)
+
+        // Safety: re-apply the last zoom, in case hardware reset it during capture
+        if let device = captureDevice {
+            do {
+                try device.lockForConfiguration()
+                device.videoZoomFactor = max(1.0, min(device.videoZoomFactor, device.activeFormat.videoMaxZoomFactor))
+                device.unlockForConfiguration()
+            } catch {
+                // non-fatal
+            }
         }
     }
     
@@ -510,7 +561,11 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
          
             if(textRecognizer != nil) {
                 let visionImage = VisionImage(buffer: sampleBuffer)
-                visionImage.orientation = orientation
+                // base orientation from camera (your existing cached value)
+                let base = imageOrientation(fromDevicePosition: cameraPosition)
+                // apply forced quarter turns
+                visionImage.orientation = rotate(base, turns: forcedQuarterTurns)
+//                visionImage.orientation = orientation
                 
                 do {
                     let result = try textRecognizer?.results(in: visionImage)
@@ -579,6 +634,13 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     func processImage(visionImage: VisionImage, image: UIImage? = nil, selectedImagePath : String? = nil) {
         if textRecognizer != nil {
             
+            if let ui = image {
+                       // override orientation for still images too
+                       visionImage.orientation = rotate(ui.imageOrientation, turns: forcedQuarterTurns)
+                   } else {
+                       // if coming from buffer and caller pre-set orientation, ensure it's rotated
+                       visionImage.orientation = rotate(visionImage.orientation, turns: forcedQuarterTurns)
+                   }
             var path : String?
             path = selectedImagePath
             
@@ -692,6 +754,28 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             print("setZoom error: \(error)")
         }
     }
+    
+    private func rotate90CW(_ o: UIImage.Orientation) -> UIImage.Orientation {
+        switch o {
+        case .up: return .right
+        case .right: return .down
+        case .down: return .left
+        case .left: return .up
+        case .upMirrored: return .rightMirrored
+        case .rightMirrored: return .downMirrored
+        case .downMirrored: return .leftMirrored
+        case .leftMirrored: return .upMirrored
+        @unknown default: return o
+        }
+    }
+
+    private func rotate(_ o: UIImage.Orientation, turns: Int) -> UIImage.Orientation {
+        let t = ((turns % 4) + 4) % 4
+        var cur = o
+        for _ in 0..<t { cur = rotate90CW(cur) }
+        return cur
+    }
+
 
 
     
