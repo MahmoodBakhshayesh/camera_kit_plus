@@ -412,16 +412,99 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     }
 
     // -------------------------
-    // FIXED takePicture + modern delegate
+    // UPDATED takePicture (iOS 13+, modern delegate, connection-ready)
     // -------------------------
-    func takePicture(path :String,flutterResult:  @escaping FlutterResult){
-        self.imageSavePath = path;
-        self.flutterResultTakePicture = flutterResult;
-        let settings = AVCapturePhotoSettings()
-        if captureDevice.hasFlash {
-            settings.flashMode = self.flashMode
+    func takePicture(path :String, flutterResult:  @escaping FlutterResult){
+        guard let photoOutput = self.photoOutput else {
+            flutterResult(FlutterError(code: "-100", message: "Photo output not configured", details: nil))
+            return
         }
-        photoOutput?.capturePhoto(with: settings, delegate:self)
+        guard let device = self.captureDevice else {
+            flutterResult(FlutterError(code: "-104", message: "Camera device not ready", details: nil))
+            return
+        }
+        guard self.initCameraFinished == true else {
+            flutterResult(FlutterError(code: "-105", message: "Camera not initialized yet", details: nil))
+            return
+        }
+        guard !isCapturing else {
+            flutterResult(FlutterError(code: "-106", message: "Capture in progress", details: nil))
+            return
+        }
+        isCapturing = true
+
+        self.imageSavePath = path
+        self.flutterResultTakePicture = flutterResult
+
+        // iOS 13+: use modern settings with explicit format
+        let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+        if photoOutput.isHighResolutionCaptureEnabled {
+            settings.isHighResolutionPhotoEnabled = true
+        }
+
+        // Apply still-photo flash mode if supported
+        let desiredFlash = self.flashMode ?? .off
+        if device.hasFlash, photoOutput.supportedFlashModes.contains(desiredFlash) {
+            settings.flashMode = desiredFlash
+        }
+
+        // Ensure the session is running
+        if !self.session.isRunning { self.session.startRunning() }
+
+        // Wait for photo connection to be active (prevents "No active and enabled video connection")
+        self.waitForActivePhotoConnection { conn in
+            guard let conn = conn else {
+                self.isCapturing = false
+                flutterResult(FlutterError(code: "-107",
+                                           message: "No active/enabled video connection",
+                                           details: "Waited for connection but it never became active"))
+                return
+            }
+
+            // Sync orientation/mirroring to preview
+            if let prev = self.previewLayer?.connection, prev.isVideoOrientationSupported {
+                conn.videoOrientation = prev.videoOrientation
+            }
+            if conn.isVideoMirroringSupported {
+                conn.automaticallyAdjustsVideoMirroring = false
+                conn.isVideoMirrored = (self.cameraPosition == .front)
+            }
+
+            DispatchQueue.main.async {
+                photoOutput.capturePhoto(with: settings, delegate: self)
+            }
+        }
+    }
+
+    // Modern photo delegate (iOS 13+)
+    func photoOutput(_ output: AVCapturePhotoOutput,
+                     didFinishProcessingPhoto photo: AVCapturePhoto,
+                     error: Error?) {
+        defer { isCapturing = false }
+        AudioServicesDisposeSystemSoundID(1108)
+
+        if let error = error {
+            self.flutterResultTakePicture?(FlutterError(code: "-101", message: error.localizedDescription, details: nil))
+            return
+        }
+
+        guard let data = photo.fileDataRepresentation(),
+              let image = UIImage(data: data) else {
+            self.flutterResultTakePicture?(FlutterError(code: "-102", message: "No photo data", details: nil))
+            return
+        }
+
+        _ = self.saveImage(image: image)
+
+        // Optional: keep current zoom stable after capture
+        if let device = self.captureDevice {
+            do {
+                try device.lockForConfiguration()
+                let clamped = max(1.0, min(device.videoZoomFactor, device.activeFormat.videoMaxZoomFactor))
+                device.videoZoomFactor = clamped
+                device.unlockForConfiguration()
+            } catch { /* ignore */ }
+        }
     }
     
     // Save to the provided path (or Documents/pic.jpg) and return the path via FlutterResult
@@ -443,6 +526,7 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
                                                     withIntermediateDirectories: true)
             try data.write(to: url, options: .atomic)
             self.flutterResultTakePicture?(url.path)
+            print(url.path)
             return true
         } catch {
             print("saveImage error: \(error)")
@@ -489,24 +573,40 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
 //        do {
 //            let result = try tr.results(in: visionImage)
 //            let txt = result.text
-//            if !txt.isEmpty {
-//                var listLineModel: [LineModel] = []
 //
+//            var listLineModel: [LineModel] = []
+//            if !txt.isEmpty {
 //                for b in result.blocks {
 //                    for l in b.lines {
-//                        let lineModel : LineModel = LineModel()
+//                        let lineModel = LineModel()
 //                        lineModel.text = l.text
 //                        for c in l.cornerPoints {
-//                            lineModel.cornerPoints.append(CornerPointModel(x: c.cgPointValue.x, y: c.cgPointValue.y))
+//                            lineModel.cornerPoints.append(
+//                                CornerPointModel(x: c.cgPointValue.x, y: c.cgPointValue.y)
+//                            )
 //                        }
 //                        listLineModel.append(lineModel)
 //                    }
 //                }
+//            }
 //
-//                self.onTextRead(text: txt, values: listLineModel, path: "", orientation:  visionImage.orientation.rawValue)
+//            // ----- draw overlays -----
+//            let imgSize = self.lastFrameImageSize
+//            DispatchQueue.main.async {
+//                if !txt.isEmpty && imgSize != .zero {
+//                    self.drawOverlays(for: listLineModel,
+//                                      imageSize: imgSize,
+//                                      turns: self.forcedQuarterTurns)
+//                } else {
+//                    self.clearOverlays()
+//                }
+//            }
+//            // -------------------------
 //
+//            if !txt.isEmpty {
+//                self.onTextRead(text: txt, values: listLineModel, path: "", orientation: visionImage.orientation.rawValue)
 //            } else {
-//                self.onTextRead(text: "", values: [], path: "", orientation:  nil)
+//                self.onTextRead(text: "", values: [], path: "", orientation: nil)
 //            }
 //
 //        } catch {
@@ -848,12 +948,12 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
                 // Macro: Ultra Wide focuses closest (on supported iPhones)
                 return AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back)
                     ?? AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: .back)
-                    ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+                ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)!
             } else {
                 // Normal: prefer virtual multi-cam so iOS can pick best lens for zoom range
                 return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
                     ?? AVCaptureDevice.default(.builtInTripleCamera, for: .video, position: .back)
-                    ?? AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: .back)
+                ?? AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: .back) // keep as-is if you had it
                     ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
             }
         }()
@@ -882,7 +982,6 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             applyFocusConfiguration()
 
             // Keep your existing outputs; they remain attached to the session
-            // Preview layer will continue using the same session
 
         } catch {
             print("switchBackCamera error: \(error)")

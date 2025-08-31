@@ -81,7 +81,7 @@ class _MyAppState extends State<MyApp> {
                       child: CameraKitOcrPlusView(
                       controller: controller,
                       onTextRead: (OcrData data) {
-                        log(data.text);
+                        // log(data.text);
                       },
                     )),
               Expanded(
@@ -132,7 +132,7 @@ class _MyAppState extends State<MyApp> {
                         onPressed: () async {
                           try {
                             final path = await controller.takePicture();
-                            log("${path}");
+                            log("path:${path}");
 
                           }catch(e){
                             log("$e");
