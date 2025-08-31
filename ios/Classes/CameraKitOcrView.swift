@@ -32,6 +32,9 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     var flutterResultOcr:FlutterResult!
     var orientation : UIImage.Orientation!
     private var isCapturing = false
+    private var overlayView: UIView!
+    private let overlayLayer = CAShapeLayer()
+    private var lastFrameImageSize: CGSize = .zero //
 
     /// 0:camera 1:barcodeScanner 2:ocrReader
     var usageMode:Int = 0
@@ -76,7 +79,25 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         }
         previewView.isUserInteractionEnabled = true
         attachZoomGesturesIfNeeded()
+        if overlayView == nil {
+            overlayView = UIView(frame: previewView.bounds)
+            overlayView.backgroundColor = .clear
+            overlayView.isUserInteractionEnabled = false
+            overlayLayer.strokeColor = UIColor.systemYellow.cgColor
+            overlayLayer.fillColor = UIColor.clear.cgColor
+            overlayLayer.lineWidth = 2.0
+            overlayLayer.lineJoin = .round
+            overlayLayer.lineCap = .round
+            overlayView.layer.addSublayer(overlayLayer)
+            previewView.addSubview(overlayView)
+        }
         return previewView
+    }
+    
+    private func layoutOverlaysToPreviewBounds() {
+        guard overlayView != nil else { return }
+        overlayView.frame = previewView.bounds
+        overlayLayer.frame = overlayView.bounds
     }
 
     func createNativeView(view _view: UIView){
@@ -100,6 +121,8 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             result(true)
 
         case "changeFlashMode":
+            let mode = (myArgs?["flashModeID"] as? Int)!
+            changeFlashMode(modeID: mode, result: result)
             result(true)
 
         case "changeCameraVisibility":
@@ -188,6 +211,7 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     private func bestBackCamera() -> AVCaptureDevice? {
         let discovery = AVCaptureDevice.DiscoverySession(
             deviceTypes: [
+                .builtInUltraWideCamera,       // iPhone Pro models
                 .builtInTripleCamera,       // iPhone Pro models
                 .builtInDualWideCamera,     // many iPhones
                 .builtInWideAngleCamera     // fallback
@@ -203,7 +227,6 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         session.sessionPreset = AVCaptureSession.Preset.hd1920x1080
 
         // pick best back camera
-        if #available(iOS 13.0, *) {
             if cameraPosition == .back, let dev = bestBackCamera() {
                 captureDevice = dev
             } else if let dev = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: cameraPosition) {
@@ -211,9 +234,7 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             } else {
                 return
             }
-        } else {
-            // Fallback on earlier versions
-        }
+
 
         beginSession()
         // changeFlashMode()
@@ -284,6 +305,8 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             rootLayer.masksToBounds = true
             if(rootLayer.bounds.size.width != 0 && rootLayer.bounds.size.width != 0){
                 self.previewLayer.frame = rootLayer.bounds
+                self.layoutOverlaysToPreviewBounds()
+
                 rootLayer.addSublayer(self.previewLayer)
                 self.session.startRunning()
                 if isFirst == true {
@@ -299,9 +322,55 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         }
     }
 
-    func setFlashMode(mode: AVCaptureDevice.TorchMode){
-        // torch stub (your earlier code had it disabled)
+    /// Sets continuous torch for preview, and updates the still-photo flash mode to match.
+    /// Pass .off / .on / .auto (AVCaptureDevice.TorchMode)
+    func setFlashMode(mode: AVCaptureDevice.TorchMode) {
+        // 1) Keep your photo flash mode in sync for still captures
+        switch mode {
+        case .on:   self.flashMode = .on
+        case .auto: self.flashMode = .auto
+        default:    self.flashMode = .off
+        }
+
+        // 2) Apply torch for the live preview (rear camera only)
+        guard let device = self.captureDevice,
+              device.hasTorch,
+              self.cameraPosition == .back
+        else {
+            // Front camera or no torch: nothing else to do
+            return
+        }
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+
+            // If requested mode isn’t supported, fall back gracefully
+            guard device.isTorchModeSupported(mode) else {
+                device.torchMode = .off
+                return
+            }
+
+            switch mode {
+            case .on:
+                // Use max available torch level if we can, else default ON
+        
+                let level = min(1.0, AVCaptureDevice.maxAvailableTorchLevel)
+                    try? device.setTorchModeOn(level: level)
+
+            case .auto:
+                device.torchMode = .auto
+            case .off:
+                device.torchMode = .off
+            @unknown default:
+                device.torchMode = .off
+            }
+
+        } catch {
+            print("Torch config error: \(error)")
+        }
     }
+
 
     func changeFlashMode(modeID: Int,result:  @escaping FlutterResult){
         setFlashMode(mode: (modeID == 2) ?(.auto):(modeID == 1 ? (.on) : (.off)))
@@ -410,40 +479,40 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     // -------------------------
     // OCR (camera frames)
     // -------------------------
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard let tr = textRecognizer else { return }
-
-        let visionImage = VisionImage(buffer: sampleBuffer)
-        let base = imageOrientation(fromDevicePosition: cameraPosition)
-        visionImage.orientation = rotate(base, turns: forcedQuarterTurns)
-
-        do {
-            let result = try tr.results(in: visionImage)
-            let txt = result.text
-            if !txt.isEmpty {
-                var listLineModel: [LineModel] = []
-
-                for b in result.blocks {
-                    for l in b.lines {
-                        let lineModel : LineModel = LineModel()
-                        lineModel.text = l.text
-                        for c in l.cornerPoints {
-                            lineModel.cornerPoints.append(CornerPointModel(x: c.cgPointValue.x, y: c.cgPointValue.y))
-                        }
-                        listLineModel.append(lineModel)
-                    }
-                }
-
-                self.onTextRead(text: txt, values: listLineModel, path: "", orientation:  visionImage.orientation.rawValue)
-
-            } else {
-                self.onTextRead(text: "", values: [], path: "", orientation:  nil)
-            }
-
-        } catch {
-            print("can't fetch result: \(error)")
-        }
-    }
+//    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+//        guard let tr = textRecognizer else { return }
+//
+//        let visionImage = VisionImage(buffer: sampleBuffer)
+//        let base = imageOrientation(fromDevicePosition: cameraPosition)
+//        visionImage.orientation = rotate(base, turns: forcedQuarterTurns)
+//
+//        do {
+//            let result = try tr.results(in: visionImage)
+//            let txt = result.text
+//            if !txt.isEmpty {
+//                var listLineModel: [LineModel] = []
+//
+//                for b in result.blocks {
+//                    for l in b.lines {
+//                        let lineModel : LineModel = LineModel()
+//                        lineModel.text = l.text
+//                        for c in l.cornerPoints {
+//                            lineModel.cornerPoints.append(CornerPointModel(x: c.cgPointValue.x, y: c.cgPointValue.y))
+//                        }
+//                        listLineModel.append(lineModel)
+//                    }
+//                }
+//
+//                self.onTextRead(text: txt, values: listLineModel, path: "", orientation:  visionImage.orientation.rawValue)
+//
+//            } else {
+//                self.onTextRead(text: "", values: [], path: "", orientation:  nil)
+//            }
+//
+//        } catch {
+//            print("can't fetch result: \(error)")
+//        }
+//    }
 
     func onBarcodeRead(barcode: String) {
         channel.invokeMethod("onBarcodeRead", arguments: barcode)
@@ -678,8 +747,8 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         }else{
             switchBackCamera(preferUltraWide: false)
         }
-        if enabled { setZoom(factor: max(1.0, min(1.3, maxZoomFactor)), animated: true) }
-        if !enabled { setZoom(factor: max(1.0, min(1.0, maxZoomFactor)), animated: true) }
+//        if enabled { setZoom(factor: max(1.0, min(1.3, maxZoomFactor)), animated: true) }
+//        if !enabled { setZoom(factor: max(1.0, min(1.0, maxZoomFactor)), animated: true) }
     }
 
     private func applyFocusConfiguration() {
@@ -762,6 +831,7 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         if d.isFocusModeSupported(.continuousAutoFocus) || d.isFocusModeSupported(.autoFocus) || d.isFocusModeSupported(.locked) {
             status["lensPosition"] = d.lensPosition  // 0 = far, 1 = near (approximate)
         }
+        print(status)
         return status
     }
     
@@ -781,7 +851,8 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
                     ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
             } else {
                 // Normal: prefer virtual multi-cam so iOS can pick best lens for zoom range
-                return AVCaptureDevice.default(.builtInTripleCamera, for: .video, position: .back)
+                return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+                    ?? AVCaptureDevice.default(.builtInTripleCamera, for: .video, position: .back)
                     ?? AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: .back)
                     ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
             }
@@ -817,6 +888,185 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             print("switchBackCamera error: \(error)")
         }
     }
+    
+    /// Map a point from image space (width x height) into previewView's coordinates,
+    /// taking .resizeAspectFill into account. If `turns` != 0, rotates the image point
+    /// by 90° * turns around the image center before mapping.
+    private func previewPoint(fromImagePoint p: CGPoint,
+                              imageSize: CGSize,
+                              turns: Int = 0) -> CGPoint
+    {
+        var pt = p
+        var imgW = imageSize.width
+        var imgH = imageSize.height
+
+        // Apply 90° steps rotation in image space if needed
+        let t = ((turns % 4) + 4) % 4
+        if t != 0 {
+            // rotate about image center
+            let cx = imgW * 0.5, cy = imgH * 0.5
+            let x = p.x - cx, y = p.y - cy
+            var xr = x, yr = y
+            // 90° CW per turn
+            for _ in 0..<t {
+                let nx =  y
+                let ny = -x
+                xr = nx; yr = ny
+                // swap width/height for each quarter-turn
+                swap(&imgW, &imgH)
+            }
+            pt = CGPoint(x: xr + imgW*0.5, y: yr + imgH*0.5)
+        }
+
+        // Aspect-fill scale & offset to previewView
+        let pv = previewView.bounds.size
+        let s = max(pv.width / imgW, pv.height / imgH)
+        let drawW = imgW * s
+        let drawH = imgH * s
+        let ox = (pv.width  - drawW) * 0.5
+        let oy = (pv.height - drawH) * 0.5
+
+        return CGPoint(x: ox + pt.x * s, y: oy + pt.y * s)
+    }
+    
+    private func drawOverlays(for lines: [LineModel],
+                              imageSize: CGSize,
+                              turns: Int)
+    {
+        let path = UIBezierPath()
+
+        for line in lines {
+            guard line.cornerPoints.count >= 4 else { continue }
+
+            let pts = line.cornerPoints.map { cp -> CGPoint in
+                let ip = CGPoint(x: cp.x, y: cp.y)
+                return self.previewPointUsingPreviewLayer(fromImagePoint: ip,
+                                                          imageSize: imageSize,
+                                                          turns: turns)
+            }
+
+            let quad = UIBezierPath()
+            quad.move(to: pts[0])
+            quad.addLine(to: pts[1])
+            quad.addLine(to: pts[2])
+            quad.addLine(to: pts[3])
+            quad.close()
+            path.append(quad)
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(false)
+        CATransaction.setAnimationDuration(0.12)
+        overlayLayer.path = path.cgPath
+        CATransaction.commit()
+    }
+
+    
+    /// Convert an image-space pixel point (x in [0..imageW], y in [0..imageH])
+    /// to a point in the previewView using previewLayer's converter.
+    /// This handles .resizeAspectFill cropping, mirroring and orientation.
+    private func previewPointUsingPreviewLayer(fromImagePoint p: CGPoint,
+                                               imageSize: CGSize,
+                                               turns: Int = 0) -> CGPoint
+    {
+        // Apply 90° CW rotations in image space if you use forcedQuarterTurns
+        var pt = p
+        var w = imageSize.width
+        var h = imageSize.height
+        let t = ((turns % 4) + 4) % 4
+        if t != 0 {
+            // rotate around image center by 90° CW per turn
+            let cx = w * 0.5, cy = h * 0.5
+            var x = p.x - cx, y = p.y - cy
+            for _ in 0..<t {
+                let nx =  y
+                let ny = -x
+                x = nx; y = ny
+                swap(&w, &h) // width/height swap each quarter turn
+            }
+            pt = CGPoint(x: x + w*0.5, y: y + h*0.5)
+        }
+
+        // Normalize to [0,1] in the *capture device* space
+        let norm = CGPoint(x: pt.x / w, y: pt.y / h)
+
+        // Ask the preview layer to transform to layer space (handles aspectFill + mirroring)
+        guard let pv = self.previewLayer else { return .zero }
+        return pv.layerPointConverted(fromCaptureDevicePoint: norm)
+    }
+
+    
+    private func clearOverlays() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(false)
+        CATransaction.setAnimationDuration(0.08)
+        overlayLayer.path = nil
+        CATransaction.commit()
+    }
+    
+    public func captureOutput(_ output: AVCaptureOutput,
+                       didOutput sampleBuffer: CMSampleBuffer,
+                       from connection: AVCaptureConnection) {
+        guard let tr = textRecognizer else { return }
+
+        // get image size from the frame
+        if let img = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            let w = CGFloat(CVPixelBufferGetWidth(img))
+            let h = CGFloat(CVPixelBufferGetHeight(img))
+            lastFrameImageSize = CGSize(width: w, height: h)
+        }
+
+        let visionImage = VisionImage(buffer: sampleBuffer)
+        let base = imageOrientation(fromDevicePosition: cameraPosition)
+        visionImage.orientation = rotate(base, turns: forcedQuarterTurns)
+
+        do {
+            let result = try tr.results(in: visionImage)
+            let txt = result.text
+
+            var listLineModel: [LineModel] = []
+            if !txt.isEmpty {
+                for b in result.blocks {
+                    for l in b.lines {
+                        let lineModel = LineModel()
+                        lineModel.text = l.text
+                        for c in l.cornerPoints {
+                            lineModel.cornerPoints.append(
+                                CornerPointModel(x: c.cgPointValue.x, y: c.cgPointValue.y)
+                            )
+                        }
+                        listLineModel.append(lineModel)
+                    }
+                }
+            }
+
+            // ----- draw overlays -----
+            let imgSize = self.lastFrameImageSize
+            DispatchQueue.main.async {
+                if !txt.isEmpty && imgSize != .zero {
+                    self.drawOverlays(for: listLineModel,
+                                      imageSize: imgSize,
+                                      turns: self.forcedQuarterTurns)
+                } else {
+                    self.clearOverlays()
+                }
+            }
+            // -------------------------
+
+            if !txt.isEmpty {
+                self.onTextRead(text: txt, values: listLineModel, path: "", orientation: visionImage.orientation.rawValue)
+            } else {
+                self.onTextRead(text: "", values: [], path: "", orientation: nil)
+            }
+
+        } catch {
+            print("can't fetch result: \(error)")
+        }
+    }
+
+
+
+
 
 
 }
