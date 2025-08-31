@@ -64,4 +64,8 @@ abstract class CameraKitPlusPlatform extends PlatformInterface {
     throw UnimplementedError('takePicture not been implemented.');
   }
 
+  Future<bool?> setMacro(bool macro) {
+    throw UnimplementedError('setMacro not been implemented.');
+  }
+
 }

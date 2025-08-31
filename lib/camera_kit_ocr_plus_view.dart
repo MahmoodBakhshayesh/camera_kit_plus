@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -82,6 +83,10 @@ class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView>  with Widge
       String jsonStr = methodCall.arguments.toString();
       OcrData data = OcrData.fromJson(jsonDecode(jsonStr));
       widget.onTextRead?.call(data);
+    }else if(methodCall.method == "onMacroChanged"){
+      log("onMacroChanged");
+      String jsonStr = methodCall.arguments.toString();
+      log(jsonStr);
     }
   }
 

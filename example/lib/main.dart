@@ -81,7 +81,7 @@ class _MyAppState extends State<MyApp> {
                       child: CameraKitOcrPlusView(
                       controller: controller,
                       onTextRead: (OcrData data) {
-                        log(data.text);
+                        // log(data.text);
                       },
                     )),
               Expanded(
@@ -91,15 +91,15 @@ class _MyAppState extends State<MyApp> {
                     children: [
                       TextButton(
                         onPressed: () {
-                          controller.pauseCamera();
+                          controller.setMacro(true);
                         },
-                        child: Text("Pause"),
+                        child: Text("macro on"),
                       ),
                       TextButton(
                         onPressed: () {
-                          controller.resumeCamera();
+                          controller.setMacro(false);
                         },
-                        child: Text("Continue"),
+                        child: Text("macro off"),
                       ),
                       TextButton(
                         onPressed: () {

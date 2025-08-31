@@ -75,6 +75,13 @@ class MethodChannelCameraKitPlus extends CameraKitPlusPlatform {
     return zoomChange;
   }
 
+  @override
+  Future<bool?> setMacro(bool macro) async {
+    final zoomChange = await methodChannel.invokeMethod<bool>('setMacro',{"enabled":macro});
+
+    return zoomChange;
+  }
+
 // await channel.invokeMethod('setOcrRotation', {'degrees': 90}); // rotate CW 90°
 // await channel.invokeMethod('clearOcrRotation');
 }

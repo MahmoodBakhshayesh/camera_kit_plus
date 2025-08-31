@@ -5,6 +5,7 @@ import Foundation
 import AVFoundation
 
 
+@available(iOS 13.0, *)
 class CameraKitOcrPlusViewFactory: NSObject, FlutterPlatformViewFactory {
     private var messenger: FlutterBinaryMessenger
 

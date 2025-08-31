@@ -39,6 +39,9 @@ class CameraKitPlus {
   Future<bool?> clearOcrRotation() {
     return CameraKitPlusPlatform.instance.clearOcrRotation();
   }
+  Future<bool?> setMacro(bool macro) {
+    return CameraKitPlusPlatform.instance.setMacro(macro);
+  }
 
   // await channel.invokeMethod('setOcrRotation', {'degrees': 90}); // rotate CW 90°
   // await channel.invokeMethod('clearOcrRotation');

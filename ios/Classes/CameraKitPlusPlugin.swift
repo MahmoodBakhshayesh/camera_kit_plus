@@ -2,6 +2,7 @@ import Flutter
 import AVFoundation
 import UIKit
 
+@available(iOS 13.0, *)
 public class CameraKitPlusPlugin: NSObject, FlutterPlugin {
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "camera_kit_plus", binaryMessenger: registrar.messenger())

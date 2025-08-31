@@ -8,7 +8,7 @@ import MLKitTextRecognition
 import MLKitCommon
 import MLKitVision
 
-@available(iOS 10.0, *)
+@available(iOS 13.0, *)
 class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDelegate, AVCaptureVideoDataOutputSampleBufferDelegate {
     private var _view: UIView
     var channel: FlutterMethodChannel
@@ -47,6 +47,9 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     // Forced OCR rotation (0..3 quarter turns)
     private var forcedQuarterTurns: Int = 0
 
+    // ===== Macro =====
+    private var isMacroEnabled: Bool = false
+
     init(
         frame: CGRect,
         viewIdentifier viewId: Int64,
@@ -63,7 +66,6 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         self.channel.setMethodCallHandler(handle)
         createNativeView(view: _view)
         setupCamera()
-        setupAVCapture()
         channel = FlutterMethodChannel(name: "camera_kit_plus", binaryMessenger: messenger!)
         channel.setMethodCallHandler(handle)
     }
@@ -71,7 +73,6 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     func view() -> UIView {
         if previewView == nil {
             self.previewView = UIView(frame: frame)
-            // previewView.contentMode = .scaleAspectFill
         }
         previewView.isUserInteractionEnabled = true
         attachZoomGesturesIfNeeded()
@@ -96,11 +97,9 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             self.getCameraPermission(flutterResult: result)
 
         case "initCamera":
-            // no-op; you already call setup in init
             result(true)
 
         case "changeFlashMode":
-            // wire your flash mapping here if needed
             result(true)
 
         case "changeCameraVisibility":
@@ -115,7 +114,7 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             self.resumeCamera(); result(true)
 
         case "takePicture":
-            let path = myArgs?["path"] as? String
+            let path = (myArgs?["path"] as? String)!
             self.takePicture(path:path,flutterResult: result)
 
         case "dispose":
@@ -133,7 +132,7 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             self.setZoom(factor: 1.0, animated: true)
             result(true)
 
-        case "setOcrRotation": // expects degrees: 0,90,180,270
+        case "setOcrRotation":
             let deg = (myArgs?["degrees"] as? Int) ?? 0
             let turns = ((deg / 90) % 4 + 4) % 4
             self.forcedQuarterTurns = turns
@@ -141,6 +140,12 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
 
         case "clearOcrRotation":
             self.forcedQuarterTurns = 0
+            result(true)
+
+        // ===== New: Macro toggle from Flutter =====
+        case "setMacro":
+            let enabled = (myArgs?["enabled"] as? Bool) ?? false
+            self.setMacro(enabled: enabled)
             result(true)
 
         default:
@@ -178,16 +183,37 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         self.setupAVCapture()
     }
 
-    @available(iOS 10.0, *)
+    // Prefer virtual multi-camera when available (auto lens switching), else plain wide-angle
+    @available(iOS 13.0, *)
+    private func bestBackCamera() -> AVCaptureDevice? {
+        let discovery = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [
+                .builtInTripleCamera,       // iPhone Pro models
+                .builtInDualWideCamera,     // many iPhones
+                .builtInWideAngleCamera     // fallback
+            ],
+            mediaType: .video,
+            position: .back
+        )
+        return discovery.devices.first
+    }
+
+    @available(iOS 13.0, *)
     func setupAVCapture(){
         session.sessionPreset = AVCaptureSession.Preset.hd1920x1080
-        guard let device = AVCaptureDevice
-            .default(AVCaptureDevice.DeviceType.builtInWideAngleCamera,
-                     for: .video,
-                     position: cameraPosition) else {
-            return
+
+        // pick best back camera
+        if #available(iOS 13.0, *) {
+            if cameraPosition == .back, let dev = bestBackCamera() {
+                captureDevice = dev
+            } else if let dev = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: cameraPosition) {
+                captureDevice = dev
+            } else {
+                return
+            }
+        } else {
+            // Fallback on earlier versions
         }
-        captureDevice = device
 
         beginSession()
         // changeFlashMode()
@@ -236,6 +262,9 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             if session.canAddOutput(photoOutput!){
                 session.addOutput(photoOutput!)
             }
+
+            // Apply focus/AF settings (macro-aware)
+            applyFocusConfiguration()
 
             // Preview
             previewLayer = AVCaptureVideoPreviewLayer(session: self.session)
@@ -316,143 +345,35 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     // -------------------------
     // FIXED takePicture + modern delegate
     // -------------------------
-    func takePicture(path: String?, flutterResult: @escaping FlutterResult) {
-        guard let photoOutput = self.photoOutput else {
-            flutterResult(FlutterError(code: "-100", message: "Photo output not configured", details: nil))
-            return
+    func takePicture(path :String,flutterResult:  @escaping FlutterResult){
+        self.imageSavePath = path;
+        self.flutterResultTakePicture = flutterResult;
+        let settings = AVCapturePhotoSettings()
+        if captureDevice.hasFlash {
+            settings.flashMode = self.flashMode
         }
-        guard let device = self.captureDevice else {
-            flutterResult(FlutterError(code: "-104", message: "Camera device not ready", details: nil))
-            return
-        }
-        guard initCameraFinished == true else {
-            flutterResult(FlutterError(code: "-105", message: "Camera not initialized yet", details: nil))
-            return
-        }
-        guard !isCapturing else {
-            flutterResult(FlutterError(code: "-106", message: "Capture in progress", details: nil))
-            return
-        }
-        isCapturing = true
-
-        self.imageSavePath = path
-        self.flutterResultTakePicture = flutterResult
-
-        let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
-
-        // Only set flash if valid and supported
-        if let mode = self.flashMode,
-           device.isFlashAvailable,
-           photoOutput.supportedFlashModes.contains(mode) {
-            settings.flashMode = mode
-        }
-
-        if photoOutput.isHighResolutionCaptureEnabled {
-            settings.isHighResolutionPhotoEnabled = true
-        }
-
-        // Match photo orientation to the preview (no force unwraps)
-        if let conn = photoOutput.connection(with: .video) {
-            if let prev = previewLayer?.connection, prev.isVideoOrientationSupported {
-                conn.videoOrientation = prev.videoOrientation
-            }
-            if conn.isVideoMirroringSupported {
-                conn.automaticallyAdjustsVideoMirroring = false
-                conn.isVideoMirrored = (cameraPosition == .front)
-            }
-        }
-        
-        // Make sure the session is running
-        if !self.session.isRunning { self.session.startRunning() }
-
-        // Wait until the photo connection is active, then capture
-        self.waitForActivePhotoConnection { conn in
-            guard let conn = conn else {
-                self.isCapturing = false
-                flutterResult(FlutterError(code: "-107",
-                                           message: "No active/enabled video connection",
-                                           details: "Waited for connection but it never became active"))
-                return
-            }
-
-            // Sync orientation/mirroring to preview (same as before)
-            if let prev = self.previewLayer?.connection, prev.isVideoOrientationSupported {
-                conn.videoOrientation = prev.videoOrientation
-            }
-            if conn.isVideoMirroringSupported {
-                conn.automaticallyAdjustsVideoMirroring = false
-                conn.isVideoMirrored = (self.cameraPosition == .front)
-            }
-
-            DispatchQueue.main.async {
-                photoOutput.capturePhoto(with: settings, delegate: self)
-            }
-        }
-
-        // Fire on main
-//        DispatchQueue.main.async {
-//            photoOutput.capturePhoto(with: settings, delegate: self)
-//        }
-    }
-
-    // Modern delegate — single entry point
-    func photoOutput(_ output: AVCapturePhotoOutput,
-                     didFinishProcessingPhoto photo: AVCapturePhoto,
-                     error: Error?) {
-        defer { isCapturing = false }
-
-        if let error = error {
-            self.flutterResultTakePicture?(FlutterError(code: "-101", message: error.localizedDescription, details: nil))
-            return
-        }
-
-        guard let data = photo.fileDataRepresentation(),
-              let image = UIImage(data: data) else {
-            self.flutterResultTakePicture?(FlutterError(code: "-102", message: "No photo data", details: nil))
-            return
-        }
-
-        _ = self.saveImage(image: image)
-
-        // Re-assert zoom (in case capture nudged it)
-        if let device = self.captureDevice {
-            do {
-                try device.lockForConfiguration()
-                let clamped = max(1.0, min(device.videoZoomFactor, device.activeFormat.videoMaxZoomFactor))
-                device.videoZoomFactor = clamped
-                device.unlockForConfiguration()
-            } catch { /* ignore */ }
-        }
+        photoOutput?.capturePhoto(with: settings, delegate:self)
     }
     
     // Save to the provided path (or Documents/pic.jpg) and return the path via FlutterResult
     func saveImage(image: UIImage) -> Bool {
-        // Encode
         guard let data = image.jpegData(compressionQuality: 0.95) ?? image.pngData() else {
             self.flutterResultTakePicture?(FlutterError(code: "-103a", message: "Could not encode image", details: nil))
             return false
         }
-
-        // Resolve destination URL
         let url: URL = {
-            if let p = self.imageSavePath, !p.isEmpty {
-                return URL(fileURLWithPath: p)
-            } else {
-                let dir = (try? FileManager.default.url(for: .documentDirectory,
-                                                        in: .userDomainMask,
-                                                        appropriateFor: nil,
-                                                        create: true))
-                          ?? URL(fileURLWithPath: NSTemporaryDirectory())
-                return dir.appendingPathComponent("pic.jpg")
-            }
+            let dir = (try? FileManager.default.url(for: .documentDirectory,
+                                                    in: .userDomainMask,
+                                                    appropriateFor: nil,
+                                                    create: true))
+                      ?? URL(fileURLWithPath: NSTemporaryDirectory())
+            return dir.appendingPathComponent("pic.jpg")
         }()
-
-        // Ensure folder exists, write atomically, then callback
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)
             try data.write(to: url, options: .atomic)
-            self.flutterResultTakePicture?(url.path)  // success -> send path back
+            self.flutterResultTakePicture?(url.path)
             return true
         } catch {
             print("saveImage error: \(error)")
@@ -461,9 +382,6 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         }
     }
 
-    
-    /// Wait until AVCapturePhotoOutput has an active + enabled video connection,
-    /// then call back with it (or nil on timeout).
     private func waitForActivePhotoConnection(
         maxAttempts: Int = 20,
         delayMs: Int = 50,
@@ -489,7 +407,6 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         tick()
     }
 
-
     // -------------------------
     // OCR (camera frames)
     // -------------------------
@@ -497,13 +414,11 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         guard let tr = textRecognizer else { return }
 
         let visionImage = VisionImage(buffer: sampleBuffer)
-        // base orientation from camera (your existing cached value)
         let base = imageOrientation(fromDevicePosition: cameraPosition)
-        // apply forced quarter turns
         visionImage.orientation = rotate(base, turns: forcedQuarterTurns)
 
         do {
-            let result = try tr.results(in: visionImage)   // non-optional MLKit.Text
+            let result = try tr.results(in: visionImage)
             let txt = result.text
             if !txt.isEmpty {
                 var listLineModel: [LineModel] = []
@@ -569,7 +484,6 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             let image = UIImage(data: imageData)
             if image == nil { return }
             let visionImage = VisionImage(image: image!)
-            // Force rotation knob applies to stills too
             visionImage.orientation = rotate(image!.imageOrientation, turns: forcedQuarterTurns)
             processImage(visionImage: visionImage, selectedImagePath: path)
         } catch {
@@ -580,10 +494,8 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     func processImage(visionImage: VisionImage, image: UIImage? = nil, selectedImagePath : String? = nil) {
         if textRecognizer != nil {
             if let ui = image {
-                // override orientation for still images too
                 visionImage.orientation = rotate(ui.imageOrientation, turns: forcedQuarterTurns)
             } else {
-                // if coming from buffer and caller pre-set orientation, ensure it's rotated
                 visionImage.orientation = rotate(visionImage.orientation, turns: forcedQuarterTurns)
             }
             let path : String? = selectedImagePath
@@ -648,11 +560,10 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             }
 
         case .ended, .cancelled, .failed:
-            // Clamp & optionally smooth
             let target = max(minZoomFactor, min(device.videoZoomFactor, maxZoomFactor))
             do {
                 try device.lockForConfiguration()
-                device.ramp(toVideoZoomFactor: target, withRate: 8.0) // smooth snap
+                device.ramp(toVideoZoomFactor: target, withRate: 8.0)
                 device.unlockForConfiguration()
             } catch {
                 print("Zoom end error: \(error)")
@@ -718,7 +629,6 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         } else {
             // Fallback on earlier versions
         }
-        // Fallback (older iOS)
         return UIApplication.shared.statusBarOrientation
     }
 
@@ -727,13 +637,12 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         switch io {
         case .portrait:             return .portrait
         case .portraitUpsideDown:   return .portraitUpsideDown
-        case .landscapeLeft:        return .landscapeRight   // flipped when mapping UI to device
+        case .landscapeLeft:        return .landscapeRight
         case .landscapeRight:       return .landscapeLeft
         default:                    return .portrait
         }
     }
 
-    /// Maps device/UI orientation + camera position to UIImage.Orientation for ML Kit.
     public func imageOrientation(
         fromDevicePosition devicePosition: AVCaptureDevice.Position = .back
     ) -> UIImage.Orientation {
@@ -757,5 +666,157 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         }
     }
 
-}
+    // ===== Macro helpers =====
+    @available(iOS 13.0, *)
+    private func setMacro(enabled: Bool) {
+        isMacroEnabled = enabled
+        applyFocusConfiguration()
+        // Optional: small zoom to help framing when close
+        
+        if(enabled){
+            switchBackCamera(preferUltraWide: enabled)
+        }else{
+            switchBackCamera(preferUltraWide: false)
+        }
+        if enabled { setZoom(factor: max(1.0, min(1.3, maxZoomFactor)), animated: true) }
+        if !enabled { setZoom(factor: max(1.0, min(1.0, maxZoomFactor)), animated: true) }
+    }
 
+    private func applyFocusConfiguration() {
+        guard let device = captureDevice else { return }
+        do {
+            try device.lockForConfiguration()
+
+            // General AF settings
+            if device.isSmoothAutoFocusSupported {
+                device.isSmoothAutoFocusEnabled = true
+            }
+            device.isSubjectAreaChangeMonitoringEnabled = true
+
+            // Set center focus point for stability (0..1 coordinates)
+            if device.isFocusPointOfInterestSupported {
+                device.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5)
+            }
+
+            // Macro bias
+            if isMacroEnabled, device.isAutoFocusRangeRestrictionSupported {
+                device.autoFocusRangeRestriction = .near
+            } else if device.isAutoFocusRangeRestrictionSupported {
+                device.autoFocusRangeRestriction = .none
+            }
+
+            // Use continuous AF, falling back to auto focus
+            if device.isFocusModeSupported(.continuousAutoFocus) {
+                device.focusMode = .continuousAutoFocus
+            } else if device.isFocusModeSupported(.autoFocus) {
+                device.focusMode = .autoFocus
+            }
+
+            // (Optional) slight manual nudge toward near focus if supported
+            // Uncomment if you want a stronger macro bias:
+            // if isMacroEnabled, device.isFocusModeSupported(.locked) {
+            //     let near: Float = 0.85 // 0.0 = far, 1.0 = near (approx)
+            //     device.setFocusModeLocked(lensPosition: near) { _ in }
+            // }
+            channel.invokeMethod("onMacroChanged", arguments: self.buildMacroStatus())
+
+            device.unlockForConfiguration()
+        } catch {
+            print("applyFocusConfiguration error: \(error)")
+        }
+    }
+    
+    private func buildMacroStatus() -> [String: Any] {
+        print("buildMacroStatus")
+        var status: [String: Any] = [
+            "requestedMacro": isMacroEnabled as Any
+        ]
+        guard let d = captureDevice else { return status }
+
+        status["supportsNearRestriction"] = d.isAutoFocusRangeRestrictionSupported
+        if d.isAutoFocusRangeRestrictionSupported {
+            status["autoFocusRangeRestriction"] = (d.autoFocusRangeRestriction == .near ? "near" :
+                                                   d.autoFocusRangeRestriction == .far  ? "far"  : "none")
+        }
+        status["focusMode"] = {
+            switch d.focusMode {
+            case .locked: return "locked"
+            case .autoFocus: return "autoFocus"
+            case .continuousAutoFocus: return "continuousAutoFocus"
+            @unknown default: return "unknown"
+            }
+        }()
+        status["smoothAutoFocus"] = d.isSmoothAutoFocusSupported ? d.isSmoothAutoFocusEnabled : false
+        status["subjectAreaMonitoring"] = d.isSubjectAreaChangeMonitoringEnabled
+        status["focusPOISupported"] = d.isFocusPointOfInterestSupported
+        if d.isFocusPointOfInterestSupported {
+            status["focusPOI"] = ["x": d.focusPointOfInterest.x, "y": d.focusPointOfInterest.y]
+        }
+        status["zoomFactor"] = d.videoZoomFactor
+        status["maxZoomFactor"] = d.activeFormat.videoMaxZoomFactor
+        status["deviceType"] = d.deviceType.rawValue
+        if #available(iOS 13.0, *) {
+            status["fieldOfView"] = d.activeFormat.videoFieldOfView
+        }
+        // Lens position is read-only; useful to see we're near the close end (≈1.0)
+        if d.isFocusModeSupported(.continuousAutoFocus) || d.isFocusModeSupported(.autoFocus) || d.isFocusModeSupported(.locked) {
+            status["lensPosition"] = d.lensPosition  // 0 = far, 1 = near (approximate)
+        }
+        return status
+    }
+    
+    /// Switches the active back camera device. If `preferUltraWide` is true,
+    /// it picks Ultra Wide (for close focus). Otherwise it uses the virtual
+    /// multi-camera if available (triple/dual-wide), falling back to Wide.
+    @available(iOS 13.0, *)
+    private func switchBackCamera(preferUltraWide: Bool) {
+        guard cameraPosition == .back else { return }
+
+        // Choose target device
+        let target: AVCaptureDevice? = {
+            if preferUltraWide {
+                // Macro: Ultra Wide focuses closest (on supported iPhones)
+                return AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back)
+                    ?? AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: .back)
+                    ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+            } else {
+                // Normal: prefer virtual multi-cam so iOS can pick best lens for zoom range
+                return AVCaptureDevice.default(.builtInTripleCamera, for: .video, position: .back)
+                    ?? AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: .back)
+                    ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+            }
+        }()
+
+        guard let newDevice = target else { return }
+
+        do {
+            let newInput = try AVCaptureDeviceInput(device: newDevice)
+
+            session.beginConfiguration()
+            defer { session.commitConfiguration() }
+
+            // Remove ONLY existing video device inputs
+            for input in session.inputs {
+                if let dInput = input as? AVCaptureDeviceInput, dInput.device.hasMediaType(.video) {
+                    session.removeInput(dInput)
+                }
+            }
+
+            if session.canAddInput(newInput) {
+                session.addInput(newInput)
+                self.captureDevice = newDevice
+            }
+
+            // Re-apply focus / macro bias on the new device
+            applyFocusConfiguration()
+
+            // Keep your existing outputs; they remain attached to the session
+            // Preview layer will continue using the same session
+
+        } catch {
+            print("switchBackCamera error: \(error)")
+        }
+    }
+
+
+}
