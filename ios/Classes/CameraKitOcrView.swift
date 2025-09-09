@@ -35,6 +35,12 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     private var overlayView: UIView!
     private let overlayLayer = CAShapeLayer()
     private var lastFrameImageSize: CGSize = .zero //
+    private var muteShutter: Bool = true
+    private var prevAudioCategory: AVAudioSession.Category?
+    private var prevAudioMode: AVAudioSession.Mode?
+    private var prevAudioOptions: AVAudioSession.CategoryOptions = []
+    private var didChangeAudioSession = false
+
 
     /// 0:camera 1:barcodeScanner 2:ocrReader
     var usageMode:Int = 0
@@ -450,11 +456,16 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
 
         // Ensure the session is running
         if !self.session.isRunning { self.session.startRunning() }
+        
+        self.beginSilentAudioSessionIfNeeded()
+
 
         // Wait for photo connection to be active (prevents "No active and enabled video connection")
         self.waitForActivePhotoConnection { conn in
             guard let conn = conn else {
                 self.isCapturing = false
+                self.endSilentAudioSessionIfNeeded()   // <— restore
+
                 flutterResult(FlutterError(code: "-107",
                                            message: "No active/enabled video connection",
                                            details: "Waited for connection but it never became active"))
@@ -480,8 +491,10 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     func photoOutput(_ output: AVCapturePhotoOutput,
                      didFinishProcessingPhoto photo: AVCapturePhoto,
                      error: Error?) {
-        defer { isCapturing = false }
-        AudioServicesDisposeSystemSoundID(1108)
+        defer {
+            isCapturing = false
+            self.endSilentAudioSessionIfNeeded()   // <— restore here
+        }
 
         if let error = error {
             self.flutterResultTakePicture?(FlutterError(code: "-101", message: error.localizedDescription, details: nil))
@@ -733,6 +746,7 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             do {
                 try device.lockForConfiguration()
                 device.ramp(toVideoZoomFactor: target, withRate: 8.0)
+                  channel.invokeMethod("onZoomChanged", arguments: target)
                 device.unlockForConfiguration()
             } catch {
                 print("Zoom end error: \(error)")
@@ -757,9 +771,13 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             } else {
                 device.videoZoomFactor = clamped
             }
+
+            channel.invokeMethod("onZoomChanged", arguments: factor)
+
             device.unlockForConfiguration()
             lastZoomFactor = clamped
         } catch {
+
             print("setZoom error: \(error)")
         }
     }
@@ -1163,9 +1181,48 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         }
     }
 
+    // ======== SOUND EFFECT (UPDATED) ========
+    // Stronger shutter suppression using a temporary .record session.
+    // Note: On devices sold in JP/KR, iOS forces shutter sound.
 
+    private func beginSilentAudioSessionIfNeeded() {
+        guard muteShutter else { return }
+        let audio = AVAudioSession.sharedInstance()
 
+        // Save previous state to restore later
+        prevAudioCategory = audio.category
+        prevAudioMode = audio.mode
+        prevAudioOptions = audio.categoryOptions
 
+        do {
+            // .record reliably suppresses system sounds (incl. shutter) while active
+            try audio.setCategory(.record, mode: .default, options: [])
+            try audio.setActive(true, options: [])
+            didChangeAudioSession = true
+        } catch {
+            print("AudioSession begin (mute shutter) error: \(error)")
+            didChangeAudioSession = false
+        }
+    }
 
+    private func endSilentAudioSessionIfNeeded() {
+        guard didChangeAudioSession else { return }
+        let audio = AVAudioSession.sharedInstance()
+        do {
+            // Deactivate our temporary session first
+            try audio.setActive(false, options: [.notifyOthersOnDeactivation])
+
+            // Restore previous category/mode/options if we had them
+            if let cat = prevAudioCategory, let mode = prevAudioMode {
+                try audio.setCategory(cat, mode: mode, options: prevAudioOptions)
+                try audio.setActive(true, options: [])
+            }
+        } catch {
+            print("AudioSession restore error: \(error)")
+        }
+        didChangeAudioSession = false
+    }
+    // =======================================
 
 }
+ 

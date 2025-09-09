@@ -79,6 +79,12 @@ class _MyAppState extends State<MyApp> {
                           : SizedBox())
                   : Expanded(
                       child: CameraKitOcrPlusView(
+                        showFrame: true,
+                        showZoomSlider: true,
+
+                        onZoomChanged: (double zoom){
+                          log("zoom is ${zoom}");
+                        },
                       controller: controller,
                       onTextRead: (OcrData data) {
                         // log(data.text);
@@ -91,13 +97,13 @@ class _MyAppState extends State<MyApp> {
                     children: [
                       TextButton(
                         onPressed: () {
-                          controller.setMacro(true);
+                          controller.setZoom(2.0);
                         },
                         child: Text("macro on"),
                       ),
                       TextButton(
                         onPressed: () {
-                          controller.setMacro(false);
+                          controller.setZoom(1.0);
                         },
                         child: Text("macro off"),
                       ),

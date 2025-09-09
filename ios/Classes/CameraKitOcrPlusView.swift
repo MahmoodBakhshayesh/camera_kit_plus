@@ -334,8 +334,10 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
             } else {
                 device.videoZoomFactor = clamped
             }
+            self.channel?.invokeMethod("onZoomChanged", arguments: factor)
             device.unlockForConfiguration()
             lastZoomFactor = clamped
+
         } catch {
             print("setZoom error: \(error)")
         }

@@ -9,18 +9,22 @@ import 'camera_kit_plus_controller.dart';
 
 class CameraKitOcrPlusView extends StatefulWidget {
   final void Function(OcrData data)? onTextRead;
+  final void Function(double zoom)? onZoomChanged;
+  final bool showFrame;
+  final bool showZoomSlider;
   final CameraKitPlusController? controller;
 
-  const CameraKitOcrPlusView({super.key, required this.onTextRead, this.controller});
+  const CameraKitOcrPlusView({super.key, required this.onTextRead, this.controller, this.onZoomChanged, this.showFrame = false, this.showZoomSlider = false});
 
   @override
   State<CameraKitOcrPlusView> createState() => _CameraKitOcrPlusViewState();
 }
 
-class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView>  with WidgetsBindingObserver{
+class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView> with WidgetsBindingObserver {
   static const channel = MethodChannel('camera_kit_plus');
   late CameraKitPlusController controller;
   bool paused = false;
+  double zoom = 1;
   @override
   void initState() {
     // channel.setMethodCallHandler(_methodCallHandler);
@@ -30,18 +34,56 @@ class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView>  with Widge
 
   @override
   Widget build(BuildContext context) {
-    return VisibilityDetector(
-      key: const Key('camera-kit-ocr-plus-view'),
-      onVisibilityChanged: _onVisibilityChanged,
-      child: Platform.isAndroid
-          ? paused?SizedBox():AndroidView(
-              viewType: 'camera-kit-ocr-plus-view',
-              onPlatformViewCreated: _onPlatformViewCreated,
-            )
-          : paused?SizedBox():UiKitView(
-              viewType: 'camera-kit-ocr-plus-view',
-              onPlatformViewCreated: _onPlatformViewCreated,
+    double width = MediaQuery.of(context).size.width * 0.9;
+
+    return Stack(
+      children: [
+        VisibilityDetector(
+          key: const Key('camera-kit-ocr-plus-view'),
+          onVisibilityChanged: _onVisibilityChanged,
+          child: Platform.isAndroid
+              ? paused
+                  ? SizedBox()
+                  : AndroidView(
+                      viewType: 'camera-kit-ocr-plus-view',
+                      onPlatformViewCreated: _onPlatformViewCreated,
+                    )
+              : paused
+                  ? SizedBox()
+                  : UiKitView(
+                      viewType: 'camera-kit-ocr-plus-view',
+                      onPlatformViewCreated: _onPlatformViewCreated,
+                    ),
+        ),
+        !widget.showFrame
+            ? SizedBox()
+            : IgnorePointer(child: Align(alignment: Alignment.center, child: SizedBox(width: width, height: width * 0.7, child: Image.asset("assets/images/scanner_frame.png", package: 'camera_kit_plus', fit: BoxFit.fill)))),
+        !widget.showZoomSlider
+            ? SizedBox()
+            : IgnorePointer(
+          ignoring: false,
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              width: width,
+              height: 40,
+              margin: EdgeInsets.only(bottom: 24),
+              child: Slider(
+                min: 1,
+                max: 8,
+                value: zoom,
+                onChanged: (a) {
+
+                  zoom = a;
+                  setState(() {});
+                  log("zoom $a");
+                  controller.setZoom(a);
+                },
+              ),
             ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -49,17 +91,17 @@ class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView>  with Widge
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.resumed:
-      // print("Flutter Life Cycle: resumed");
+        // print("Flutter Life Cycle: resumed");
         controller.resumeCamera();
         break;
       case AppLifecycleState.inactive:
-      // print("Flutter Life Cycle: inactive");
+        // print("Flutter Life Cycle: inactive");
         if (Platform.isIOS) {
           controller.pauseCamera();
         }
         break;
       case AppLifecycleState.paused:
-      // print("Flutter Life Cycle: paused");
+        // print("Flutter Life Cycle: paused");
         controller.pauseCamera();
         break;
       default:
@@ -83,10 +125,26 @@ class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView>  with Widge
       String jsonStr = methodCall.arguments.toString();
       OcrData data = OcrData.fromJson(jsonDecode(jsonStr));
       widget.onTextRead?.call(data);
-    }else if(methodCall.method == "onMacroChanged"){
-      log("onMacroChanged");
-      String jsonStr = methodCall.arguments.toString();
-      log(jsonStr);
+    } else if (methodCall.method == "onMacroChanged") {
+      // log("onMacroChanged");
+      // String jsonStr = methodCall.arguments.toString();
+      // log(jsonStr);
+    } else if (methodCall.method == "onZoomChanged") {
+      try {
+        double? z = methodCall.arguments;
+        log("on Zoom change d ${z}");
+        if (z != null) {
+          widget.onZoomChanged?.call(z);
+
+          zoom = z;
+          setState((){});
+        }
+      } catch (e) {
+        log("$e");
+      }
+      // log("onMacroChanged");
+      // String jsonStr = methodCall.arguments.toString();
+      // log(jsonStr);
     }
   }
 
@@ -95,12 +153,12 @@ class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView>  with Widge
     if (isVisible) {
       // controller.resumeCamera();
       paused = false;
-      if(mounted) {
+      if (mounted) {
         setState(() {});
       }
     } else {
       paused = true;
-      if(mounted) {
+      if (mounted) {
         setState(() {});
       }
       // controller.pauseCamera();
@@ -122,18 +180,18 @@ class OcrData {
   List<OcrLine> lines;
 
   factory OcrData.fromJson(Map<String, dynamic> json) => OcrData(
-    text: json["text"],
-    path: json["path"] ?? "",
-    orientation: json["orientation"] ?? 0,
-    lines: List<OcrLine>.from((json["lines"] ?? []).map((x) => OcrLine.fromJson(x))),
-  );
+        text: json["text"],
+        path: json["path"] ?? "",
+        orientation: json["orientation"] ?? 0,
+        lines: List<OcrLine>.from((json["lines"] ?? []).map((x) => OcrLine.fromJson(x))),
+      );
 
   Map<String, dynamic> toJson() => {
-    "text": text,
-    "path": path,
-    "orientation": orientation,
-    "lines": List<dynamic>.from(lines.map((x) => x.toJson())),
-  };
+        "text": text,
+        "path": path,
+        "orientation": orientation,
+        "lines": List<dynamic>.from(lines.map((x) => x.toJson())),
+      };
 }
 
 class OcrLine {
@@ -146,14 +204,14 @@ class OcrLine {
   List<OcrPoint> cornerPoints;
 
   factory OcrLine.fromJson(Map<String, dynamic> json) => OcrLine(
-    text: json["text"] ?? json["a"] ?? "",
-    cornerPoints: List<OcrPoint>.from((json["cornerPoints"] ?? json["b"] ?? []).map((x) => OcrPoint.fromJson(x))),
-  );
+        text: json["text"] ?? json["a"] ?? "",
+        cornerPoints: List<OcrPoint>.from((json["cornerPoints"] ?? json["b"] ?? []).map((x) => OcrPoint.fromJson(x))),
+      );
 
   Map<String, dynamic> toJson() => {
-    "text": text,
-    "cornerPoints": List<dynamic>.from(cornerPoints.map((x) => x.toJson())),
-  };
+        "text": text,
+        "cornerPoints": List<dynamic>.from(cornerPoints.map((x) => x.toJson())),
+      };
 }
 
 class OcrPoint {
@@ -166,12 +224,12 @@ class OcrPoint {
   double y;
 
   factory OcrPoint.fromJson(Map<String, dynamic> json) => OcrPoint(
-    x: (json["x"] ?? json["a"]).toDouble(),
-    y: (json["y"] ?? json["b"]).toDouble(),
-  );
+        x: (json["x"] ?? json["a"]).toDouble(),
+        y: (json["y"] ?? json["b"]).toDouble(),
+      );
 
   Map<String, dynamic> toJson() => {
-    "x": x,
-    "y": y,
-  };
+        "x": x,
+        "y": y,
+      };
 }
