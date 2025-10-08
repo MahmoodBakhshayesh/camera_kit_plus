@@ -9,13 +9,15 @@ import UIKit
 import Foundation
 import AVFoundation
 
-
+@available(iOS 13.0, *)
 class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputObjectsDelegate, AVCapturePhotoCaptureDelegate {
     private var _view: UIView
 //    private var captureSession: AVCaptureSession?
     var captureSession = AVCaptureSession()
     var captureDevice : AVCaptureDevice!
     private var previewLayer: AVCaptureVideoPreviewLayer?
+    var cameraPosition: AVCaptureDevice.Position! = .back
+
     private var channel: FlutterMethodChannel?
     var initCameraFinished:Bool! = false
     var cameraID = 0
@@ -23,6 +25,19 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
     private var imageCaptureResult:FlutterResult? = nil
     var photoOutput: AVCapturePhotoOutput?
 
+    private var minZoomFactor: CGFloat = 1.0
+    private var lastZoomFactor: CGFloat = 1.0
+    private var maxZoomFactor: CGFloat {
+        // Cap practical zoom to 8x to avoid ugly noise; raise if you want
+        return min(self.captureDevice?.activeFormat.videoMaxZoomFactor ?? 1.0, 8.0)
+    }
+
+    // Forced OCR rotation (0..3 quarter turns)
+    private var forcedQuarterTurns: Int = 0
+
+    // ===== Macro =====
+    private var isMacroEnabled: Bool = false
+    
     
     init(frame: CGRect, messenger: FlutterBinaryMessenger) {
         _view = UIView(frame: frame)
@@ -74,6 +89,8 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
     }
 
     func view() -> UIView {
+        _view.isUserInteractionEnabled = true
+        attachZoomGesturesIfNeeded()
         return _view
     }
     
@@ -97,10 +114,9 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
 //            }
             break
         case "changeFlashMode":
-            let flashModeID = (myArgs?["flashModeID"] as! Int);
-            self.changeFlashMode(modeID: flashModeID, result: result)
-//            self.setFlashMode(flashMode: flashModeID)
-//            self.changeFlashMode()
+            let mode = (myArgs?["flashModeID"] as? Int)!
+            changeFlashMode(modeID: mode, result: result)
+            result(true)
             break
         case "switchCamera":
             let cameraID = (myArgs?["cameraID"] as! Int);
@@ -131,6 +147,33 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
 //            let orientation = (myArgs?["orientation"] as! Int?);
 //            self.getBarcodeFromPath(path: path, flutterResult:result,orient: orientation)
             break
+        case "setZoom":
+            if let z = myArgs?["zoom"] as? Double {
+                self.setZoom(factor: CGFloat(z), animated: true)
+                result(true)
+            } else {
+                result(FlutterError(code: "bad_args", message: "zoom (Double) required", details: nil))
+            }
+
+        case "resetZoom":
+            self.setZoom(factor: 1.0, animated: true)
+            result(true)
+
+        case "setOcrRotation":
+            let deg = (myArgs?["degrees"] as? Int) ?? 0
+            let turns = ((deg / 90) % 4 + 4) % 4
+            self.forcedQuarterTurns = turns
+            result(true)
+
+        case "clearOcrRotation":
+            self.forcedQuarterTurns = 0
+            result(true)
+
+        // ===== New: Macro toggle from Flutter =====
+        case "setMacro":
+            let enabled = (myArgs?["enabled"] as? Bool) ?? false
+            self.setMacro(enabled: enabled)
+            result(true)
         case "dispose":
 //            self.getCameraPermission(flutterResult: result)
             break
@@ -182,9 +225,33 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
     
     
     func setupAVCapture(){
-        captureSession.sessionPreset = AVCaptureSession.Preset.high
-        self.captureDevice = AVCaptureDevice
-            .default(AVCaptureDevice.DeviceType.builtInWideAngleCamera,for: .video,position: .back)
+//        captureSession.sessionPreset = AVCaptureSession.Preset.high
+//        self.captureDevice = AVCaptureDevice
+//            .default(AVCaptureDevice.DeviceType.builtInWideAngleCamera,for: .video,position: .back)
+        captureSession.sessionPreset = AVCaptureSession.Preset.hd1920x1080
+
+        // pick best back camera
+            if cameraPosition == .back, let dev = bestBackCamera() {
+                captureDevice = dev
+            } else if let dev = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: cameraPosition) {
+                captureDevice = dev
+            } else {
+                return
+            }
+    }
+    @available(iOS 13.0, *)
+    private func bestBackCamera() -> AVCaptureDevice? {
+        let discovery = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [
+                .builtInUltraWideCamera,       // iPhone Pro models
+                .builtInTripleCamera,       // iPhone Pro models
+                .builtInDualWideCamera,     // many iPhones
+                .builtInWideAngleCamera     // fallback
+            ],
+            mediaType: .video,
+            position: .back
+        )
+        return discovery.devices.first
     }
     
     func switchCamera(cameraID: Int,result:  @escaping FlutterResult){
@@ -373,6 +440,226 @@ class CameraKitPlusView: NSObject, FlutterPlatformView, AVCaptureMetadataOutputO
             }
         }
     }
+    
+    @objc private func handleDoubleTapResetZoom() {
+        setZoom(factor: 1.0, animated: true)
+    }
+
+    private func setZoom(factor: CGFloat, animated: Bool = true) {
+        guard let device = self.captureDevice else { return }
+        let clamped = max(minZoomFactor, min(factor, maxZoomFactor))
+        do {
+            try device.lockForConfiguration()
+            if animated {
+                device.ramp(toVideoZoomFactor: clamped, withRate: 8.0)
+            } else {
+                device.videoZoomFactor = clamped
+            }
+
+            channel?.invokeMethod("onZoomChanged", arguments: factor)
+
+            device.unlockForConfiguration()
+            lastZoomFactor = clamped
+        } catch {
+
+            print("setZoom error: \(error)")
+        }
+    }
+    
+    private func applyFocusConfiguration() {
+        guard let device = captureDevice else { return }
+        do {
+            try device.lockForConfiguration()
+
+            // General AF settings
+            if device.isSmoothAutoFocusSupported {
+                device.isSmoothAutoFocusEnabled = true
+            }
+            device.isSubjectAreaChangeMonitoringEnabled = true
+
+            // Set center focus point for stability (0..1 coordinates)
+            if device.isFocusPointOfInterestSupported {
+                device.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5)
+            }
+
+            // Macro bias
+            if isMacroEnabled, device.isAutoFocusRangeRestrictionSupported {
+                device.autoFocusRangeRestriction = .near
+            } else if device.isAutoFocusRangeRestrictionSupported {
+                device.autoFocusRangeRestriction = .none
+            }
+
+            // Use continuous AF, falling back to auto focus
+            if device.isFocusModeSupported(.continuousAutoFocus) {
+                device.focusMode = .continuousAutoFocus
+            } else if device.isFocusModeSupported(.autoFocus) {
+                device.focusMode = .autoFocus
+            }
+
+            // (Optional) slight manual nudge toward near focus if supported
+            // Uncomment if you want a stronger macro bias:
+            // if isMacroEnabled, device.isFocusModeSupported(.locked) {
+            //     let near: Float = 0.85 // 0.0 = far, 1.0 = near (approx)
+            //     device.setFocusModeLocked(lensPosition: near) { _ in }
+            // }
+            channel?.invokeMethod("onMacroChanged", arguments: self.buildMacroStatus())
+
+            device.unlockForConfiguration()
+        } catch {
+            print("applyFocusConfiguration error: \(error)")
+        }
+    }
+    
+    private func buildMacroStatus() -> [String: Any] {
+        print("buildMacroStatus")
+        var status: [String: Any] = [
+            "requestedMacro": isMacroEnabled as Any
+        ]
+        guard let d = captureDevice else { return status }
+
+        status["supportsNearRestriction"] = d.isAutoFocusRangeRestrictionSupported
+        if d.isAutoFocusRangeRestrictionSupported {
+            status["autoFocusRangeRestriction"] = (d.autoFocusRangeRestriction == .near ? "near" :
+                                                   d.autoFocusRangeRestriction == .far  ? "far"  : "none")
+        }
+        status["focusMode"] = {
+            switch d.focusMode {
+            case .locked: return "locked"
+            case .autoFocus: return "autoFocus"
+            case .continuousAutoFocus: return "continuousAutoFocus"
+            @unknown default: return "unknown"
+            }
+        }()
+        status["smoothAutoFocus"] = d.isSmoothAutoFocusSupported ? d.isSmoothAutoFocusEnabled : false
+        status["subjectAreaMonitoring"] = d.isSubjectAreaChangeMonitoringEnabled
+        status["focusPOISupported"] = d.isFocusPointOfInterestSupported
+        if d.isFocusPointOfInterestSupported {
+            status["focusPOI"] = ["x": d.focusPointOfInterest.x, "y": d.focusPointOfInterest.y]
+        }
+        status["zoomFactor"] = d.videoZoomFactor
+        status["maxZoomFactor"] = d.activeFormat.videoMaxZoomFactor
+        status["deviceType"] = d.deviceType.rawValue
+        if #available(iOS 13.0, *) {
+            status["fieldOfView"] = d.activeFormat.videoFieldOfView
+        }
+        // Lens position is read-only; useful to see we're near the close end (≈1.0)
+        if d.isFocusModeSupported(.continuousAutoFocus) || d.isFocusModeSupported(.autoFocus) || d.isFocusModeSupported(.locked) {
+            status["lensPosition"] = d.lensPosition  // 0 = far, 1 = near (approximate)
+        }
+        print(status)
+        return status
+    }
+    
+    @available(iOS 13.0, *)
+    private func setMacro(enabled: Bool) {
+        isMacroEnabled = enabled
+        applyFocusConfiguration()
+        // Optional: small zoom to help framing when close
+        
+        if(enabled){
+            switchBackCamera(preferUltraWide: enabled)
+        }else{
+            switchBackCamera(preferUltraWide: false)
+        }
+//        if enabled { setZoom(factor: max(1.0, min(1.3, maxZoomFactor)), animated: true) }
+//        if !enabled { setZoom(factor: max(1.0, min(1.0, maxZoomFactor)), animated: true) }
+    }
+    
+    @available(iOS 13.0, *)
+    private func switchBackCamera(preferUltraWide: Bool) {
+        guard cameraPosition == .back else { return }
+
+        // Choose target device
+        let target: AVCaptureDevice? = {
+            if preferUltraWide {
+                // Macro: Ultra Wide focuses closest (on supported iPhones)
+                return AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back)
+                    ?? AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: .back)
+                ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)!
+            } else {
+                // Normal: prefer virtual multi-cam so iOS can pick best lens for zoom range
+                return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+                    ?? AVCaptureDevice.default(.builtInTripleCamera, for: .video, position: .back)
+                ?? AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: .back) // keep as-is if you had it
+                    ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+            }
+        }()
+
+        guard let newDevice = target else { return }
+
+        do {
+            let newInput = try AVCaptureDeviceInput(device: newDevice)
+
+            captureSession.beginConfiguration()
+            defer { captureSession.commitConfiguration() }
+
+            // Remove ONLY existing video device inputs
+            for input in captureSession.inputs {
+                if let dInput = input as? AVCaptureDeviceInput, dInput.device.hasMediaType(.video) {
+                    captureSession.removeInput(dInput)
+                }
+            }
+
+            if captureSession.canAddInput(newInput) {
+                captureSession.addInput(newInput)
+                self.captureDevice = newDevice
+            }
+
+            // Re-apply focus / macro bias on the new device
+            applyFocusConfiguration()
+
+            // Keep your existing outputs; they remain attached to the session
+
+        } catch {
+            print("switchBackCamera error: \(error)")
+        }
+    }
+    
+    private func attachZoomGesturesIfNeeded() {
+        if let grs = _view.gestureRecognizers, grs.isEmpty == false { return }
+
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        _view.addGestureRecognizer(pinch)
+
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTapResetZoom))
+        doubleTap.numberOfTapsRequired = 2
+        _view.addGestureRecognizer(doubleTap)
+    }
+
+    @objc private func handlePinch(_ pinch: UIPinchGestureRecognizer) {
+        guard let device = self.captureDevice else { return }
+
+        switch pinch.state {
+        case .began:
+            lastZoomFactor = device.videoZoomFactor
+
+        case .changed:
+            var newFactor = lastZoomFactor * pinch.scale
+            newFactor = max(minZoomFactor, min(newFactor, maxZoomFactor))
+            do {
+                try device.lockForConfiguration()
+                device.videoZoomFactor = newFactor
+                device.unlockForConfiguration()
+            } catch {
+                print("Zoom lock error: \(error)")
+            }
+
+        case .ended, .cancelled, .failed:
+            let target = max(minZoomFactor, min(device.videoZoomFactor, maxZoomFactor))
+            do {
+                try device.lockForConfiguration()
+                device.ramp(toVideoZoomFactor: target, withRate: 8.0)
+                channel?.invokeMethod("onZoomChanged", arguments: target)
+                device.unlockForConfiguration()
+            } catch {
+                print("Zoom end error: \(error)")
+            }
+            lastZoomFactor = target
+
+        default: break
+        }
+    }
+
 
     // Stop the capture session when the view is disposed
     func dispose() {

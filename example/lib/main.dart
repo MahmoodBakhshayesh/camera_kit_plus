@@ -64,30 +64,31 @@ class _MyAppState extends State<MyApp> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              false
+              true
                   ? Expanded(
                       child: show
                           ? CameraKitPlusView(
                               controller: controller,
+                              showZoomSlider: true,
                               onBarcodeRead: (String data) {
                                 // print(data);
+                                // log("Barcode Scanned =>$data");
                               },
                               onBarcodeDataRead: (BarcodeData data) {
-                                print("Barcode Scanned =>${data.getType} -- ${data.value}");
+                                log("Barcode Scanned =>${data.getType} -- ${data.value}");
                               },
                             )
                           : SizedBox())
                   : Expanded(
                       child: CameraKitOcrPlusView(
-                        showFrame: true,
-                        showZoomSlider: true,
-
-                        onZoomChanged: (double zoom){
-                          log("zoom is ${zoom}");
-                        },
+                      showFrame: true,
+                      showZoomSlider: true,
+                      onZoomChanged: (double zoom) {
+                        log("zoom is ${zoom}");
+                      },
                       controller: controller,
                       onTextRead: (OcrData data) {
-                        // log(data.text);
+                        log(data.text);
                       },
                     )),
               Expanded(
@@ -97,13 +98,16 @@ class _MyAppState extends State<MyApp> {
                     children: [
                       TextButton(
                         onPressed: () {
-                          controller.setZoom(2.0);
+                          controller.setZoom(3.0);
+
+                          // controller.setMacro(true);
                         },
                         child: Text("macro on"),
                       ),
                       TextButton(
                         onPressed: () {
                           controller.setZoom(1.0);
+                          // controller.setMacro(false);
                         },
                         child: Text("macro off"),
                       ),
@@ -122,11 +126,10 @@ class _MyAppState extends State<MyApp> {
                       TextButton(
                         onPressed: () async {
                           // controller.switchCamera(CameraKitPlusCameraMode.back);
-                         final roateta = await controller.setOcrRotation(270);
-                         log("roateta ${roateta}");
+                          final roateta = await controller.setOcrRotation(270);
+                          log("roateta ${roateta}");
                         },
                         child: Text("rotate"),
-
                       ),
                       // TextButton(
                       //   onPressed: () {
@@ -139,10 +142,8 @@ class _MyAppState extends State<MyApp> {
                           try {
                             final path = await controller.takePicture();
                             log("path:${path}");
-
-                          }catch(e){
+                          } catch (e) {
                             log("$e");
-
                           }
                         },
                         child: Text("take picture"),

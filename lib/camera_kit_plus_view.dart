@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+
 // import 'package:app_settings/app_settings.dart';
 import 'package:camera_kit_plus/enums.dart';
+
 // import 'package:camerakit/CameraKitView.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,21 +15,25 @@ import 'camera_kit_plus_controller.dart';
 class CameraKitPlusView extends StatefulWidget {
   final void Function(String code)? onBarcodeRead;
   final void Function(BarcodeData data)? onBarcodeDataRead;
+  final bool showFrame;
+  final bool showZoomSlider;
   final List<BarcodeType>? types;
   final CameraKitPlusController? controller;
   final bool useOld;
 
-  const CameraKitPlusView({super.key, required this.onBarcodeRead, this.onBarcodeDataRead, this.controller, this.types, this.useOld = false});
+  const CameraKitPlusView({super.key, required this.onBarcodeRead, this.onBarcodeDataRead, this.controller, this.types, this.useOld = false, this.showFrame = false, this.showZoomSlider = false});
 
   @override
   State<CameraKitPlusView> createState() => _CameraKitPlusViewState();
 }
 
-class _CameraKitPlusViewState extends State<CameraKitPlusView>  with WidgetsBindingObserver {
+class _CameraKitPlusViewState extends State<CameraKitPlusView> with WidgetsBindingObserver {
   static const channel = MethodChannel('camera_kit_plus');
   late CameraKitPlusController controller;
   late VisibilityDetector visibilityDetector;
-  bool paused  = false;
+  bool paused = false;
+  double zoom = 1;
+
   @override
   void initState() {
     // channel.setMethodCallHandler(_methodCallHandler);
@@ -70,26 +76,61 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView>  with WidgetsBind
     super.dispose();
   }
 
-
   @override
   Widget build(BuildContext context) {
+    double width = MediaQuery.of(context).size.width * 0.9;
+
     // if(widget.useOld){
     //   return CameraKitView(
     //     onBarcodeRead: widget.onBarcodeRead,
     //   );
     // }
-    return VisibilityDetector(
-      key: const Key('camera-kit-plus-view'),
-      onVisibilityChanged: _onVisibilityChanged,
-      child: Platform.isAndroid
-          ? paused?SizedBox():AndroidView(
-        viewType: 'camera-kit-plus-view',
-        onPlatformViewCreated: _onPlatformViewCreated,
-      )
-          :  paused?SizedBox():UiKitView(
-        viewType: 'camera-kit-plus-view',
-        onPlatformViewCreated: _onPlatformViewCreated,
-      ),
+    return Stack(
+      children: [
+        VisibilityDetector(
+          key: const Key('camera-kit-plus-view'),
+          onVisibilityChanged: _onVisibilityChanged,
+          child: Platform.isAndroid
+              ? paused
+                  ? SizedBox()
+                  : AndroidView(
+                      viewType: 'camera-kit-plus-view',
+                      onPlatformViewCreated: _onPlatformViewCreated,
+                    )
+              : paused
+                  ? SizedBox()
+                  : UiKitView(
+                      viewType: 'camera-kit-plus-view',
+                      onPlatformViewCreated: _onPlatformViewCreated,
+                    ),
+        ),
+        !widget.showFrame
+            ? SizedBox()
+            : IgnorePointer(child: Align(alignment: Alignment.center, child: SizedBox(width: width, height: width * 0.7, child: Image.asset("assets/images/scanner_frame.png", package: 'camera_kit_plus', fit: BoxFit.fill)))),
+        !widget.showZoomSlider
+            ? SizedBox()
+            : IgnorePointer(
+                ignoring: false,
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Container(
+                    width: width,
+                    height: 40,
+                    margin: EdgeInsets.only(bottom: 24),
+                    child: Slider(
+                      min: 1,
+                      max: 8,
+                      value: zoom,
+                      onChanged: (a) {
+                        zoom = a;
+                        setState(() {});
+                        controller.setZoom(a);
+                      },
+                    ),
+                  ),
+                ),
+              ),
+      ],
     );
     // return FutureBuilder(
     //   future: checkCameraPermission(),
@@ -187,12 +228,24 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView>  with WidgetsBind
         // print(barcodeJson);
         final dataJson = jsonDecode(barcodeJson);
         BarcodeData data = BarcodeData.fromJson(dataJson);
-        if(widget.types!=null && !widget.types!.map((a)=>a.code).contains(data.type)){
+        if (widget.types != null && !widget.types!.map((a) => a.code).contains(data.type)) {
           return;
         }
         // print(data.toJson());
         widget.onBarcodeRead?.call(data.value);
         widget.onBarcodeDataRead?.call(data);
+      } else if (methodCall.method == "onZoomChanged") {
+        try {
+          double? z = methodCall.arguments;
+          if (z != null) {
+            zoom = z;
+            setState(() {});
+          }
+        } catch (e) {
+        }
+        // log("onMacroChanged");
+        // String jsonStr = methodCall.arguments.toString();
+        // log(jsonStr);
       }
     } catch (e) {
       if (e is Error) {
@@ -208,13 +261,13 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView>  with WidgetsBind
     if (isVisible) {
       // print("object visible");
       paused = false;
-      if(mounted) {
+      if (mounted) {
         setState(() {});
       }
       // controller.resumeCamera();
     } else {
       paused = true;
-      if(mounted) {
+      if (mounted) {
         setState(() {});
       }
       // print("object not visible");
