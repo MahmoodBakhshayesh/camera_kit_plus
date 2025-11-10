@@ -1,6 +1,7 @@
 name: camera_kit_plus
 description: A Flutter Plugin Using Camera to Scan Barcodes
 version: 0.0.36
+
 homepage: https://github.com/MahmoodBakhshayesh/camera_kit_plus
 
 environment:
