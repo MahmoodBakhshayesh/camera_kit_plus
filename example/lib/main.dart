@@ -64,7 +64,7 @@ class _MyAppState extends State<MyApp> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              true
+              false
                   ? Expanded(
                       child: show
                           ? CameraKitPlusView(
