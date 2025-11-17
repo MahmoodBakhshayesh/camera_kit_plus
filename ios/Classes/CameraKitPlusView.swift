@@ -424,7 +424,12 @@ class CameraKitPlusView: NSObject,
             }
 
             device.unlockForConfiguration()
-            channel?.invokeMethod("onMacroChanged", arguments: self.buildMacroStatus())
+
+            // MAIN THREAD for channel
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.channel?.invokeMethod("onMacroChanged", arguments: self.buildMacroStatus())
+            }
         } catch {
             print("applyFocusConfiguration error: \(error)")
         }
@@ -478,9 +483,13 @@ class CameraKitPlusView: NSObject,
             } else {
                 device.videoZoomFactor = clamped
             }
-            channel?.invokeMethod("onZoomChanged", arguments: clamped)
             device.unlockForConfiguration()
             lastZoomFactor = clamped
+
+            // MAIN THREAD for channel
+            DispatchQueue.main.async { [weak self] in
+                self?.channel?.invokeMethod("onZoomChanged", arguments: clamped)
+            }
         } catch { print("setZoom error: \(error)") }
     }
 
@@ -569,8 +578,12 @@ class CameraKitPlusView: NSObject,
             do {
                 try device.lockForConfiguration()
                 device.ramp(toVideoZoomFactor: target, withRate: 8.0)
-                channel?.invokeMethod("onZoomChanged", arguments: target)
                 device.unlockForConfiguration()
+
+                // MAIN THREAD for channel
+                DispatchQueue.main.async { [weak self] in
+                    self?.channel?.invokeMethod("onZoomChanged", arguments: target)
+                }
             } catch { print("Zoom end error: \(error)") }
             lastZoomFactor = target
         default: break

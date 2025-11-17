@@ -36,8 +36,6 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
         channel?.setMethodCallHandler(handle)
     }
     
-   
-    
     private func createNativeView() {
         let screenSize = UIScreen.main.bounds
         let label = UILabel()
@@ -88,7 +86,7 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
             result(false)
         }
     }
-    
+
     func requestCameraPermission(result:  @escaping FlutterResult) {
         if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
             UIApplication.shared.open(settingsURL)
@@ -104,7 +102,7 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
 
     private func setupCamera() {
         print("Setting up the camera...")
-        
+
         // Initialize the capture device
         captureDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
         lastZoomFactor = 1.0
@@ -114,7 +112,7 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
             return
         }
         print("captureDevice initialized: \(captureDevice!)")
-        
+
         // Configure camera input
         let videoInput: AVCaptureDeviceInput
         do {
@@ -146,10 +144,10 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
         previewLayer?.videoGravity = .resizeAspectFill
         previewLayer?.frame = _view.bounds
         previewLayer?.connection?.videoOrientation = .portrait // Set orientation explicitly
-        
+
         startSession(isFirst: true)
     }
-    
+
     func startSession(isFirst: Bool) {
         DispatchQueue.main.async {
             let rootLayer :CALayer = self._view.layer
@@ -201,36 +199,29 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
                 print("Error recognizing text: \(String(describing: error))")
                 return
             }
-            
+
             if(result.text != "") {
                 var listLineModel: [LineModel] = []
-                
+
                 for b in result.blocks {
                     for l in b.lines{
                         let lineModel : LineModel = LineModel()
                         lineModel.text = l.text
-                        
-                        
-                        
+
                         for c in l.cornerPoints {
                             lineModel.cornerPoints.append(CornerPointModel(x: c.cgPointValue.x, y: c.cgPointValue.y))
                         }
-                        
+
                         listLineModel.append(lineModel)
-                        
                     }
                 }
-                
-                
+
                 self.onTextRead(text: result.text, values: listLineModel, path: "", orientation:  visionImage.orientation.rawValue)
-                
+
             } else {
-                
+
                 self.onTextRead(text: "", values: [], path: "", orientation:  nil)
             }
-//            print(result.text)
-//            let recognizedText = result.text
-//            self.channel?.invokeMethod("onTextRead", arguments: recognizedText)
         }
     }
 
@@ -252,27 +243,22 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
     func dispose() {
         captureSession.stopRunning()
     }
-    
-    
+
+
     func onTextRead(text: String, values: [LineModel], path: String?, orientation: Int?) {
         let data = OcrData(text: text, path: path, orientation: orientation, lines: values)
         let jsonEncoder = JSONEncoder()
         let jsonData = try! jsonEncoder.encode(data)
         let json = String(data: jsonData, encoding: String.Encoding.utf8)
-        self.channel?.invokeMethod("onTextRead", arguments: json)
+
+        // 🔐 Ensure channel call is always on the main thread
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.channel?.invokeMethod("onTextRead", arguments: json)
+        }
     }
-    
-//    func textRead(text: String, values: [LineModel], path: String?, orientation: Int?) {
-//        
-//        
-//        let data = OcrData(text: text, path: path, orientation: orientation, lines: values)
-//        let jsonEncoder = JSONEncoder()
-//        let jsonData = try! jsonEncoder.encode(data)
-//        let json = String(data: jsonData, encoding: String.Encoding.utf8)
-//        flutterResultOcr(json)
-//    }
-    
-    
+
+
     private func attachZoomGesturesIfNeeded() {
         guard _view.gestureRecognizers?.isEmpty ?? true else { return }
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
@@ -282,7 +268,7 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
         doubleTap.numberOfTapsRequired = 2
         _view.addGestureRecognizer(doubleTap)
     }
-    
+
     @objc private func handlePinch(_ pinch: UIPinchGestureRecognizer) {
         guard let device = self.captureDevice else { return }
         switch pinch.state {
@@ -323,7 +309,7 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
     @objc private func handleDoubleTapResetZoom() {
         setZoom(factor: 1.0, animated: true)
     }
-    
+
     private func setZoom(factor: CGFloat, animated: Bool = true) {
         guard let device = self.captureDevice else { return }
         let clamped = max(minZoomFactor, min(factor, maxZoomFactor))
@@ -334,9 +320,13 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
             } else {
                 device.videoZoomFactor = clamped
             }
-            self.channel?.invokeMethod("onZoomChanged", arguments: factor)
             device.unlockForConfiguration()
             lastZoomFactor = clamped
+
+            // 🔐 Ensure channel call is always on the main thread
+            DispatchQueue.main.async { [weak self] in
+                self?.channel?.invokeMethod("onZoomChanged", arguments: factor)
+            }
 
         } catch {
             print("setZoom error: \(error)")
