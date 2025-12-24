@@ -261,15 +261,19 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView> with WidgetsBindi
     if (isVisible) {
       // print("object visible");
       paused = false;
-      if (mounted) {
-        setState(() {});
-      }
+      Future((){
+        if (mounted) {
+          setState(() {});
+        }
+      });
       // controller.resumeCamera();
     } else {
       paused = true;
-      if (mounted) {
-        setState(() {});
-      }
+      Future((){
+        if (mounted) {
+          setState(() {});
+        }
+      });
       // print("object not visible");
       // controller.pauseCamera();
     }
