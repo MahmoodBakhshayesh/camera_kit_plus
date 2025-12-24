@@ -25,6 +25,7 @@ class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView> with Widget
   late CameraKitPlusController controller;
   bool paused = false;
   double zoom = 1;
+
   @override
   void initState() {
     // channel.setMethodCallHandler(_methodCallHandler);
@@ -50,9 +51,17 @@ class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView> with Widget
                     )
               : paused
                   ? SizedBox()
-                  : UiKitView(
-                      viewType: 'camera-kit-ocr-plus-view',
-                      onPlatformViewCreated: _onPlatformViewCreated,
+                  : OrientationBuilder(
+                      builder: (BuildContext context, Orientation orientation) {
+                        log("${orientation.name} ${orientation.index}");
+                        return RotatedBox(
+                          quarterTurns: 0,
+                          child: UiKitView(
+                            viewType: 'camera-kit-ocr-plus-view',
+                            onPlatformViewCreated: _onPlatformViewCreated,
+                          ),
+                        );
+                      },
                     ),
         ),
         !widget.showFrame
@@ -61,28 +70,27 @@ class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView> with Widget
         !widget.showZoomSlider
             ? SizedBox()
             : IgnorePointer(
-          ignoring: false,
-          child: Align(
-            alignment: Alignment.bottomCenter,
-            child: Container(
-              width: width,
-              height: 40,
-              margin: EdgeInsets.only(bottom: 24),
-              child: Slider(
-                min: 1,
-                max: 8,
-                value: zoom,
-                onChanged: (a) {
-
-                  zoom = a;
-                  setState(() {});
-                  log("zoom $a");
-                  controller.setZoom(a);
-                },
+                ignoring: false,
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Container(
+                    width: width,
+                    height: 40,
+                    margin: EdgeInsets.only(bottom: 24),
+                    child: Slider(
+                      min: 1,
+                      max: 8,
+                      value: zoom,
+                      onChanged: (a) {
+                        zoom = a;
+                        setState(() {});
+                        log("zoom $a");
+                        controller.setZoom(a);
+                      },
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
-        ),
       ],
     );
   }
@@ -137,7 +145,7 @@ class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView> with Widget
           widget.onZoomChanged?.call(z);
 
           zoom = z;
-          setState((){});
+          setState(() {});
         }
       } catch (e) {
         log("$e");
