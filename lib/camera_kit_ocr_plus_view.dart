@@ -24,13 +24,14 @@ class CameraKitOcrPlusView extends StatefulWidget {
 class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView> with WidgetsBindingObserver {
   static const channel = MethodChannel('camera_kit_plus');
   late CameraKitPlusController controller;
-  bool paused = false;
+  bool isVisible = false;
   double zoom = 1;
   @override
   void initState() {
     // channel.setMethodCallHandler(_methodCallHandler);
     controller = widget.controller ?? CameraKitPlusController();
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
@@ -46,22 +47,18 @@ class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView> with Widget
           key: const Key('camera-kit-ocr-plus-view'),
           onVisibilityChanged: _onVisibilityChanged,
           child: Platform.isAndroid
-              ? paused
-                  ? SizedBox()
-                  : AndroidView(
-                      viewType: 'camera-kit-ocr-plus-view',
-                      onPlatformViewCreated: _onPlatformViewCreated,
-                      creationParams: creationParams,
-                      creationParamsCodec: const StandardMessageCodec(),
-                    )
-              : paused
-                  ? SizedBox()
-                  : UiKitView(
-                      viewType: 'camera-kit-ocr-plus-view',
-                      onPlatformViewCreated: _onPlatformViewCreated,
-                      creationParams: creationParams,
-                      creationParamsCodec: const StandardMessageCodec(),
-                    ),
+              ? AndroidView(
+                  viewType: 'camera-kit-ocr-plus-view',
+                  onPlatformViewCreated: _onPlatformViewCreated,
+                  creationParams: creationParams,
+                  creationParamsCodec: const StandardMessageCodec(),
+                )
+              : UiKitView(
+                  viewType: 'camera-kit-ocr-plus-view',
+                  onPlatformViewCreated: _onPlatformViewCreated,
+                  creationParams: creationParams,
+                  creationParamsCodec: const StandardMessageCodec(),
+                ),
         ),
         !widget.showFrame
             ? SizedBox()
@@ -100,7 +97,9 @@ class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView> with Widget
     switch (state) {
       case AppLifecycleState.resumed:
         // print("Flutter Life Cycle: resumed");
-        controller.resumeCamera();
+        if (isVisible) {
+          controller.resumeCamera();
+        }
         break;
       case AppLifecycleState.inactive:
         // print("Flutter Life Cycle: inactive");
@@ -157,19 +156,14 @@ class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView> with Widget
   }
 
   void _onVisibilityChanged(VisibilityInfo info) {
-    bool isVisible = !(info.visibleFraction == 0);
-    if (isVisible) {
-      // controller.resumeCamera();
-      paused = false;
-      if (mounted) {
-        setState(() {});
+    bool visible = !(info.visibleFraction == 0);
+    if (visible != isVisible) {
+      isVisible = visible;
+      if (isVisible) {
+        controller.resumeCamera();
+      } else {
+        controller.pauseCamera();
       }
-    } else {
-      paused = true;
-      if (mounted) {
-        setState(() {});
-      }
-      // controller.pauseCamera();
     }
   }
 }

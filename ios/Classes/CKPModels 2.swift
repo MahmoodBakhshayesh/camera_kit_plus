@@ -6,6 +6,12 @@ import CoreGraphics
 
 // MARK: - Codable wrappers for CoreGraphics (safe to send over channel)
 
+public struct CornerPointModel: Codable {
+    public var x: Double
+    public var y: Double
+    public init(x: Double, y: Double) { self.x = x; self.y = y }
+}
+
 public struct CKPPoint: Codable {
     public var x: Double
     public var y: Double
@@ -60,6 +66,30 @@ public struct CKPLineModel: Codable {
         self.text = text
         self.confidence = confidence
         self.boundingBox = boundingBox
+        self.cornerPoints = cornerPoints
+    }
+}
+
+class OcrData: Codable {
+    var text: String
+    var path: String?
+    var orientation: Int?
+    var lines: [LineModel]
+
+    init(text: String, path: String?, orientation: Int?, lines: [LineModel]) {
+        self.text = text
+        self.path = path
+        self.orientation = orientation
+        self.lines = lines
+    }
+}
+
+class LineModel: Codable {
+    var text: String
+    var cornerPoints: [CornerPointModel] = []
+
+    init(text: String = "", cornerPoints: [CornerPointModel] = []) {
+        self.text = text
         self.cornerPoints = cornerPoints
     }
 }

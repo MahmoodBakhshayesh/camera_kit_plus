@@ -36,6 +36,8 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     var previewLayer:AVCaptureVideoPreviewLayer!
     var captureDevice : AVCaptureDevice!
     let session = AVCaptureSession()
+    private let sessionQueue = DispatchQueue(label: "camera_kit_plus.ocr.sessionQueue") // Serial queue for session ops
+    
     var textRecognizer : TextRecognizer?
     var flutterResultTakePicture:FlutterResult!
     var flutterResultOcr:FlutterResult!
@@ -392,12 +394,14 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
                     }
                 }
                 
-                if !self.session.isRunning {
-                    self.session.startRunning()
-                }
-                if isFirst == true {
-                    DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) {
-                        self.initCameraFinished = true
+                self.sessionQueue.async {
+                    if !self.session.isRunning {
+                        self.session.startRunning()
+                    }
+                    if isFirst == true {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            self.initCameraFinished = true
+                        }
                     }
                 }
             } else {
@@ -464,35 +468,37 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     }
 
     func pauseCamera() {
-        if self.initCameraFinished == true {
+        // if self.initCameraFinished == true { // Loosen check
             self.stopCamera()
             self.isCameraVisible = false
-        }
+        // }
     }
 
     func resumeCamera() {
-        if  self.initCameraFinished == true {
-            if !self.session.isRunning { self.session.startRunning() }
+        // if  self.initCameraFinished == true { // Loosen check, but mostly rely on session state
             self.isCameraVisible = true
-        }
+            sessionQueue.async {
+                if !self.session.isRunning { self.session.startRunning() }
+            }
+        // }
     }
 
     func stopCamera(){
-        if session.isRunning {
-            session.stopRunning()
+        sessionQueue.async {
+            if self.session.isRunning {
+                self.session.stopRunning()
+            }
         }
     }
 
     func changeCameraVisibility(visibility:Bool){
         if visibility == true {
             if self.isCameraVisible == false {
-                if !self.session.isRunning { self.session.startRunning() }
-                self.isCameraVisible = true
+                self.resumeCamera() // Reuse
             }
         } else {
             if self.isCameraVisible == true {
-                self.stopCamera()
-                self.isCameraVisible = false
+                self.pauseCamera() // Reuse
             }
         }
     }
@@ -509,10 +515,8 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             flutterResult(FlutterError(code: "-104", message: "Camera device not ready", details: nil))
             return
         }
-        guard self.initCameraFinished == true else {
-            flutterResult(FlutterError(code: "-105", message: "Camera not initialized yet", details: nil))
-            return
-        }
+        // guard self.initCameraFinished == true else { ... } // maybe relax if running?
+        
         guard !isCapturing else {
             flutterResult(FlutterError(code: "-106", message: "Capture in progress", details: nil))
             return
@@ -535,7 +539,9 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         }
 
         // Ensure the session is running
-        if !self.session.isRunning { self.session.startRunning() }
+        sessionQueue.async {
+            if !self.session.isRunning { self.session.startRunning() }
+        }
         
         self.beginSilentAudioSessionIfNeeded()
 
@@ -859,10 +865,10 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     public func imageOrientation(
         fromDevicePosition devicePosition: AVCaptureDevice.Position = .back
     ) -> UIImage.Orientation {
-        var deviceOrientation = UIDevice.current.orientation
-        if deviceOrientation == .faceDown || deviceOrientation == .faceUp || deviceOrientation == .unknown {
-            deviceOrientation = currentUIOrientation()
-        }
+        // Force use of currentUIOrientation (derived from interfaceOrientation)
+        // to match preview layer logic.
+        let deviceOrientation = currentUIOrientation()
+        
         switch deviceOrientation {
         case .portrait:
             return devicePosition == .front ? .leftMirrored : .right

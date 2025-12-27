@@ -30,8 +30,7 @@ class CameraKitPlusView extends StatefulWidget {
 class _CameraKitPlusViewState extends State<CameraKitPlusView> with WidgetsBindingObserver {
   static const channel = MethodChannel('camera_kit_plus');
   late CameraKitPlusController controller;
-  late VisibilityDetector visibilityDetector;
-  bool paused = false;
+  bool isVisible = false;
   double zoom = 1;
 
   @override
@@ -52,7 +51,9 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView> with WidgetsBindi
     switch (state) {
       case AppLifecycleState.resumed:
         // print("Flutter Life Cycle: resumed");
-        controller.resumeCamera();
+        if (isVisible) {
+          controller.resumeCamera();
+        }
         break;
       case AppLifecycleState.inactive:
         // print("Flutter Life Cycle: inactive");
@@ -91,18 +92,14 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView> with WidgetsBindi
           key: const Key('camera-kit-plus-view'),
           onVisibilityChanged: _onVisibilityChanged,
           child: Platform.isAndroid
-              ? paused
-                  ? SizedBox()
-                  : AndroidView(
-                      viewType: 'camera-kit-plus-view',
-                      onPlatformViewCreated: _onPlatformViewCreated,
-                    )
-              : paused
-                  ? SizedBox()
-                  : UiKitView(
-                      viewType: 'camera-kit-plus-view',
-                      onPlatformViewCreated: _onPlatformViewCreated,
-                    ),
+              ? AndroidView(
+                  viewType: 'camera-kit-plus-view',
+                  onPlatformViewCreated: _onPlatformViewCreated,
+                )
+              : UiKitView(
+                  viewType: 'camera-kit-plus-view',
+                  onPlatformViewCreated: _onPlatformViewCreated,
+                ),
         ),
         !widget.showFrame
             ? SizedBox()
@@ -132,85 +129,6 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView> with WidgetsBindi
               ),
       ],
     );
-    // return FutureBuilder(
-    //   future: checkCameraPermission(),
-    //   builder: (BuildContext context, AsyncSnapshot<PermissionStatus> snapshot) {
-    //     print(snapshot.data?.isGranted);
-    //     if (!snapshot.hasData) {
-    //       return VisibilityDetector(
-    //         key: const Key('camera-kit-plus-view'),
-    //         onVisibilityChanged: _onVisibilityChanged,
-    //         child: Platform.isAndroid
-    //             ? AndroidView(
-    //                 viewType: 'camera-kit-plus-view',
-    //                 onPlatformViewCreated: _onPlatformViewCreated,
-    //               )
-    //             : UiKitView(
-    //                 viewType: 'camera-kit-plus-view',
-    //                 onPlatformViewCreated: _onPlatformViewCreated,
-    //               ),
-    //       );
-    //     }
-    //     if (snapshot.data != null && snapshot.data!.isGranted) {
-    //
-    //       return VisibilityDetector(
-    //         key: const Key('camera-kit-plus-view'),
-    //         onVisibilityChanged: _onVisibilityChanged,
-    //         child: Platform.isAndroid
-    //             ? AndroidView(
-    //                 viewType: 'camera-kit-plus-view',
-    //                 onPlatformViewCreated: _onPlatformViewCreated,
-    //               )
-    //             : UiKitView(
-    //                 viewType: 'camera-kit-plus-view',
-    //                 onPlatformViewCreated: _onPlatformViewCreated,
-    //               ),
-    //       );
-    //     }
-    //     return VisibilityDetector(
-    //       key: const Key('camera-kit-plus-view'),
-    //       onVisibilityChanged: _onVisibilityChanged,
-    //       child: Column(
-    //         mainAxisAlignment: MainAxisAlignment.center,
-    //         children: [
-    //           const Text(
-    //             "You Need Camera Permission!",
-    //             style: TextStyle(color: Colors.white),
-    //           ),
-    //           const SizedBox(height: 8),
-    //           TextButton(
-    //               onPressed: () async {
-    //                 // final pemission = await controller.getCameraPermission();
-    //                 // print("getCameraPermission ${pemission}");
-    //                 //
-    //                 // setState(() {});
-    //                 // AppSettings.openAppSettings(type: AppSettingsType.),
-    //                 // print("pemission ${pemission}");
-    //                 // setState((){});
-    //
-    //                 final status =  await Permission.camera.onDeniedCallback(() {
-    //                    setState(() {});
-    //                  }).onGrantedCallback(() {
-    //                    setState(() {});
-    //                  }).onPermanentlyDeniedCallback(() {
-    //                    setState(() {});
-    //                  }).onRestrictedCallback(() {
-    //                    setState(() {});
-    //                  }).onLimitedCallback(() {
-    //                    setState(() {});
-    //                  }).onProvisionalCallback(() {
-    //                    setState(() {});
-    //                  }).request();
-    //                  if(status != PermissionStatus.granted){
-    //                    openAppSettings();
-    //                  }
-    //               },
-    //               child: const Text("Get Permission"))
-    //         ],
-    //       ),
-    //     );
-    //   },
-    // );
   }
 
   void _onPlatformViewCreated(int id) {
@@ -257,21 +175,14 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView> with WidgetsBindi
   }
 
   void _onVisibilityChanged(VisibilityInfo info) {
-    bool isVisible = !(info.visibleFraction == 0);
-    if (isVisible) {
-      // print("object visible");
-      paused = false;
-      if (mounted) {
-        setState(() {});
+    bool visible = !(info.visibleFraction == 0);
+    if (visible != isVisible) {
+      isVisible = visible;
+      if (isVisible) {
+        controller.resumeCamera();
+      } else {
+        controller.pauseCamera();
       }
-      // controller.resumeCamera();
-    } else {
-      paused = true;
-      if (mounted) {
-        setState(() {});
-      }
-      // print("object not visible");
-      // controller.pauseCamera();
     }
   }
 }

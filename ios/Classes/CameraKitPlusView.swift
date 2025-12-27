@@ -216,12 +216,27 @@ class CameraKitPlusView: NSObject,
 
     private func updateVideoOrientation() {
         guard let conn = previewLayer?.connection, conn.isVideoOrientationSupported else { return }
-        switch UIDevice.current.orientation {
-        case .landscapeLeft:  conn.videoOrientation = .landscapeRight
-        case .landscapeRight: conn.videoOrientation = .landscapeLeft
-        case .portraitUpsideDown: conn.videoOrientation = .portraitUpsideDown
-        default: conn.videoOrientation = .portrait
+        switch interfaceOrientation() {
+        case .landscapeLeft:
+            conn.videoOrientation = .landscapeLeft
+        case .landscapeRight:
+            conn.videoOrientation = .landscapeRight
+        case .portraitUpsideDown:
+            conn.videoOrientation = .portraitUpsideDown
+        default:
+            conn.videoOrientation = .portrait
         }
+    }
+    
+    private func interfaceOrientation() -> UIInterfaceOrientation {
+        if #available(iOS 13.0, *) {
+            if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                return scene.interfaceOrientation
+            }
+        } else {
+            // Fallback on earlier versions
+        }
+        return UIApplication.shared.statusBarOrientation
     }
 
     private func updateRectOfInterest() {

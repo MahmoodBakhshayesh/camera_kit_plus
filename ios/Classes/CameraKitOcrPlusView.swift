@@ -373,31 +373,3 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
         }
     }
 }
-
-
-struct OcrData: Codable {
-    var text: String?
-    var path: String?
-    var orientation: Int?
-    var lines: [LineModel]=[]
-}
-
-// Encode
-
-
-class LineModel: Codable {
-    var text:String = ""
-    var cornerPoints : [CornerPointModel] = []
-}
-
-
-class CornerPointModel: Codable {
-    
-    init(x:CGFloat, y:CGFloat) {
-        self.x = x
-        self.y = y
-    }
-    
-    var x:CGFloat
-    var y:CGFloat
-}
