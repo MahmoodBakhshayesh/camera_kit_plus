@@ -1,3 +1,5 @@
+package com.abomis.camera_kit_plus
+
 import android.Manifest
 import android.app.Activity
 import android.content.Context
@@ -7,8 +9,8 @@ import android.graphics.Point
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CameraManager
 import android.os.Build
-import android.util.DisplayMetrics
 import android.util.Log
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -28,7 +30,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.Observer
-import com.abomis.camera_kit_plus.Classes.BarcodeData
+// import com.abomis.camera_kit_plus.Classes.BarcodeData
 import com.google.gson.Gson
 import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
@@ -39,14 +41,15 @@ import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.platform.PlatformView
+import io.flutter.plugin.common.PluginRegistry
 import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.max
 import kotlin.math.min
 
-class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
-    FrameLayout(context), PlatformView, MethodChannel.MethodCallHandler {
+class CameraKitPlusView(context: Context, messenger: BinaryMessenger, private val plugin: CameraKitPlusPlugin) :
+    FrameLayout(context), PlatformView, MethodChannel.MethodCallHandler, PluginRegistry.RequestPermissionsResultListener {
 
     private val methodChannel = MethodChannel(messenger, "camera_kit_plus")
     private lateinit var previewView: PreviewView
@@ -75,9 +78,14 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
 
     // ====== Macro bias ======
     private var macroEnabled: Boolean = false
-    private var pinchStartLinearZoom = 0f
+
+    // Cache macro support for current camera (back/front).
+    // We recompute after binding / switching camera.
+    private var macroSupported: Boolean? = null
 
     init {
+        Log.d("CameraKitPlusView", "INIT")
+
         linearLayout = getActivity(context)?.let { FrameLayout(it) }!!
         linearLayout.layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
@@ -91,6 +99,8 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
         previewView.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
 
         methodChannel.setMethodCallHandler(this)
+        
+        plugin.addListener(this)
 
         attachPinchToZoom()
         attachDoubleTapReset()
@@ -106,8 +116,23 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
         }
     }
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray): Boolean {
+        if (requestCode == REQUEST_CAMERA_PERMISSION) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                setupPreview()
+            }
+            return true
+        }
+        return false
+    }
+
     @RequiresApi(Build.VERSION_CODES.N)
     private fun setupPreview() {
+        // Avoid adding view multiple times if already added
+        if (previewView.parent != null) {
+            return
+        }
+        
         val displaySize = Point()
         val displaymetrics = context.resources.displayMetrics
         displaySize.x = displaymetrics.widthPixels
@@ -126,6 +151,9 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
 
     private fun setupCameraSelector() {
         cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+        // reset macro cache/state on selector changes
+        macroSupported = null
+        macroEnabled = false
     }
 
     @RequiresApi(Build.VERSION_CODES.N)
@@ -133,26 +161,25 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
     private fun bindUseCases(lifecycleOwner: LifecycleOwner) {
         val provider = cameraProvider ?: return
 
-        // --- Preview with optional Macro scene mode via Camera2Interop
+        // --- Preview with optional Macro AF mode via Camera2Interop
         val previewBuilder = Preview.Builder()
             .setTargetAspectRatio(AspectRatio.RATIO_16_9)
 
-        // Apply MACRO scene mode if requested (best-effort)
+        // Apply MACRO AF mode if requested (best-effort)
         if (macroEnabled) {
+            Log.d("CameraKitPlusView", "Enabling Macro AF mode for Preview")
             try {
                 val ext = Camera2Interop.Extender(previewBuilder)
-                ext.setCaptureRequestOption(
-                    CaptureRequest.CONTROL_MODE,
-                    CameraMetadata.CONTROL_MODE_USE_SCENE_MODE
-                )
-                ext.setCaptureRequestOption(
-                    CaptureRequest.CONTROL_SCENE_MODE,
-                    CameraMetadata.CONTROL_AF_MODE_MACRO
-                )
+                // Prefer AF_MODE_MACRO
                 ext.setCaptureRequestOption(
                     CaptureRequest.CONTROL_AF_MODE,
-                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+                    CaptureRequest.CONTROL_AF_MODE_MACRO
                 )
+                // Also try SCENE_MODE_MACRO as a fallback/reinforcement
+//                 ext.setCaptureRequestOption(
+//                    CaptureRequest.CONTROL_SCENE_MODE,
+//                    CameraMetadata.SCENE_MODE_MACRO
+//                )
             } catch (t: Throwable) {
                 Log.w("CameraX", "Macro interop (Preview) not applied: ${t.message}")
             }
@@ -166,19 +193,12 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
         val analysisBuilder = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
         if (macroEnabled) {
+            Log.d("CameraKitPlusView", "Enabling Macro AF mode for ImageAnalysis")
             try {
                 val ext = Camera2Interop.Extender(analysisBuilder)
                 ext.setCaptureRequestOption(
-                    CaptureRequest.CONTROL_MODE,
-                    CameraMetadata.CONTROL_MODE_USE_SCENE_MODE
-                )
-                ext.setCaptureRequestOption(
-                    CaptureRequest.CONTROL_SCENE_MODE,
-                    CameraMetadata.CONTROL_AF_MODE_MACRO
-                )
-                ext.setCaptureRequestOption(
                     CaptureRequest.CONTROL_AF_MODE,
-                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+                    CaptureRequest.CONTROL_AF_MODE_MACRO
                 )
             } catch (t: Throwable) {
                 Log.w("CameraX", "Macro interop (Analysis) not applied: ${t.message}")
@@ -195,19 +215,12 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
             .setTargetAspectRatio(AspectRatio.RATIO_16_9)
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
         if (macroEnabled) {
+            Log.d("CameraKitPlusView", "Enabling Macro AF mode for ImageCapture")
             try {
                 val ext = Camera2Interop.Extender(captureBuilder)
                 ext.setCaptureRequestOption(
-                    CaptureRequest.CONTROL_MODE,
-                    CameraMetadata.CONTROL_MODE_USE_SCENE_MODE
-                )
-                ext.setCaptureRequestOption(
-                    CaptureRequest.CONTROL_SCENE_MODE,
-                    CameraMetadata.CONTROL_AF_MODE_MACRO
-                )
-                ext.setCaptureRequestOption(
                     CaptureRequest.CONTROL_AF_MODE,
-                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+                    CaptureRequest.CONTROL_AF_MODE_MACRO
                 )
             } catch (t: Throwable) {
                 Log.w("CameraX", "Macro interop (Capture) not applied: ${t.message}")
@@ -232,19 +245,13 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
             return
         }
 
+        // Recompute macro support for current bound camera
+        macroSupported = isMacroSupported(camera)
+
         // Observe zoom changes -> send to Flutter
         camera?.cameraInfo?.zoomState?.observe(lifecycleOwner, Observer { state ->
             state?.let { methodChannel.invokeMethod("onZoomChanged", it.zoomRatio) }
         })
-
-        // Optional small zoom nudge when macro is enabled (helps framing)
-        if (macroEnabled) {
-            val state = camera?.cameraInfo?.zoomState?.value
-            val minZ = state?.minZoomRatio ?: 1f
-            val maxZ = state?.maxZoomRatio ?: 1f
-            val target = 1.3f.coerceIn(minZ, maxZ)
-            camera?.cameraControl?.setZoomRatio(target)
-        }
 
         // Send macro status
         methodChannel.invokeMethod("onMacroChanged", buildMacroStatus())
@@ -252,6 +259,7 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
 
     @RequiresApi(Build.VERSION_CODES.N)
     private fun setupCamera() {
+        Log.d("CameraKitPlusView", "Enabling Macro AF mode for ImageCapture")
         val activity = getActivity(context)
         val lifecycleOwner = activity as LifecycleOwner
 
@@ -263,7 +271,13 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
             cameraProvider = cameraProviderFuture.get()
-
+            
+            // Log full camera details to debug (using CameraManager)
+            logCameraManagerInfo()
+            
+            // Log CameraX details
+            logAllAvailableCameras()
+            
             // (Re)bind with current selector + macro settings
             bindUseCases(lifecycleOwner)
         }, ContextCompat.getMainExecutor(context))
@@ -317,12 +331,12 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
                             timestamps.retainAll { currentTime - it <= detectionWindowMs }
                             if (timestamps.size >= detectionThreshold) {
                                 methodChannel.invokeMethod("onBarcodeScanned", rawValue)
-                                methodChannel.invokeMethod("onBarcodeDataScanned", Gson().toJson(BarcodeData(barcode)))
+                                // methodChannel.invokeMethod("onBarcodeDataScanned", Gson().toJson(BarcodeData(barcode)))
                                 barcodeTimestamps.remove(rawValue)
                             }
                         } else {
                             methodChannel.invokeMethod("onBarcodeScanned", rawValue)
-                            methodChannel.invokeMethod("onBarcodeDataScanned", Gson().toJson(BarcodeData(barcode)))
+                            // methodChannel.invokeMethod("onBarcodeDataScanned", Gson().toJson(BarcodeData(barcode)))
                         }
                     }
                     val now = System.currentTimeMillis()
@@ -412,7 +426,6 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
         }
     }
 
-
     private fun attachDoubleTapReset() {
         tapDetector = android.view.GestureDetector(
             context,
@@ -458,20 +471,31 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
         setZoom(1f)
     }
 
-    // ======= Macro toggle (best-effort via Camera2 SCENE_MODE_MACRO) =======
-    @RequiresApi(Build.VERSION_CODES.N)
-    private fun setMacro(enabled: Boolean) {
-        macroEnabled = enabled
-        val lifecycleOwner = getActivity(context) as? LifecycleOwner ?: return
-        // Rebind with new interop flags
-        bindUseCases(lifecycleOwner)
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun isMacroSupported(cam: Camera?): Boolean {
+        if (cam == null) return false
+        return try {
+            val c2 = Camera2CameraInfo.from(cam.cameraInfo)
+
+            // FIX: Access characteristics directly via c2.getCameraCharacteristic()
+            val afModes = c2.getCameraCharacteristic(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
+            val hasMacroAf = afModes.contains(CaptureRequest.CONTROL_AF_MODE_MACRO)
+
+            val minFocus = c2.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
+            val hasOpticalCloseFocus = (minFocus != null && minFocus > 0f)
+
+            hasMacroAf && hasOpticalCloseFocus
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     // Build a status map similar to iOS for debugging/visibility
     @OptIn(ExperimentalCamera2Interop::class)
     private fun buildMacroStatus(): Map<String, Any?> {
         val map = mutableMapOf<String, Any?>(
-            "requestedMacro" to macroEnabled
+            "requestedMacro" to macroEnabled,
+            "macroSupported" to (macroSupported ?: isMacroSupported(camera))
         )
         val cam = camera ?: return map
         val info2 = try { Camera2CameraInfo.from(cam.cameraInfo) } catch (_: Throwable) { null }
@@ -480,33 +504,34 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
         map["maxZoomRatio"] = cam.cameraInfo.zoomState.value?.maxZoomRatio
         map["minZoomRatio"] = cam.cameraInfo.zoomState.value?.minZoomRatio
 
-//        info2?.let { c2 ->
-//            try {
-//                val chars = c2.cameraCharacteristics
-//                val facing = chars.get(CameraCharacteristics.LENS_FACING)
-//                map["lensFacing"] = when (facing) {
-//                    CameraCharacteristics.LENS_FACING_FRONT -> "front"
-//                    CameraCharacteristics.LENS_FACING_BACK -> "back"
-//                    CameraCharacteristics.LENS_FACING_EXTERNAL -> "external"
-//                    else -> "unknown"
-//                }
-//                val minFocus = chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
-//                map["minFocusDistanceDiopters"] = minFocus
-//                val focals = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-//                map["focalLengths"] = focals?.map { it.toDouble() }
-//
-//                val modes = chars.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
-//                map["supportsMacroAfMode"] = modes.contains(CaptureRequest.CONTROL_AF_MODE_MACRO)
-//            } catch (t: Throwable) {
-//                map["cameraInfoError"] = t.message
-//            }
-//        }
+        info2?.let { c2 ->
+            try {
+                // val chars = c2.cameraCharacteristics
+                val facing = c2.getCameraCharacteristic(CameraCharacteristics.LENS_FACING)
+                map["lensFacing"] = when (facing) {
+                    CameraCharacteristics.LENS_FACING_FRONT -> "front"
+                    CameraCharacteristics.LENS_FACING_BACK -> "back"
+                    CameraCharacteristics.LENS_FACING_EXTERNAL -> "external"
+                    else -> "unknown"
+                }
+                val minFocus = c2.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
+                map["minFocusDistanceDiopters"] = minFocus
+                val focals = c2.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                map["focalLengths"] = focals?.map { it.toDouble() }
+
+                val modes = c2.getCameraCharacteristic(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
+                map["supportsMacroAfMode"] = modes.contains(CaptureRequest.CONTROL_AF_MODE_MACRO)
+            } catch (t: Throwable) {
+                map["cameraInfoError"] = t.message
+            }
+        }
         return map
     }
 
     override fun getView(): FrameLayout = linearLayout
 
     override fun dispose() {
+        plugin.removeListener(this)
         cameraExecutor.shutdown()
     }
 
@@ -557,8 +582,8 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
             // === New: Macro toggle parity with iOS ===
             "setMacro" -> {
                 val enabled = call.argument<Boolean>("enabled") ?: false
-                setMacro(enabled)
-                result.success(true)
+                val ok = setMacro(enabled)
+                result.success(ok)
             }
 
             "dispose" -> dispose()
@@ -573,6 +598,10 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
         } else {
             CameraSelector.DEFAULT_FRONT_CAMERA
         }
+
+        // Switching cameras should reset macro state; many devices only support macro on back.
+        macroEnabled = false
+        macroSupported = null
         setupCamera()
     }
 
@@ -598,4 +627,302 @@ class CameraKitPlusView(context: Context, messenger: BinaryMessenger) :
     private fun changeFlashMode(flashModeID: Int, result: MethodChannel.Result) {
         camera?.cameraControl?.enableTorch(flashModeID == 1)
     }
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun cameraIdOf(info: CameraInfo): String? = try {
+        Camera2CameraInfo.from(info).cameraId
+    } catch (_: Throwable) {
+        null
+    }
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun minFocusDistanceOf(info: CameraInfo): Float? = try {
+        Camera2CameraInfo.from(info)
+            .getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
+    } catch (_: Throwable) {
+        null
+    }
+
+    private fun isBackCamera(info: CameraInfo): Boolean {
+        // CameraX has a lensFacing in CameraInfo via CameraSelector filters,
+        // but easiest safe check is Camera2 LENS_FACING:
+        return try {
+            val facing = Camera2CameraInfo.from(info)
+                .getCameraCharacteristic(CameraCharacteristics.LENS_FACING)
+            facing == CameraCharacteristics.LENS_FACING_BACK
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun buildSelectorForCameraId(targetId: String): CameraSelector {
+        return CameraSelector.Builder()
+            .addCameraFilter { infos ->
+                infos.filter { info -> cameraIdOf(info) == targetId }
+            }
+            .build()
+    }
+
+    private fun findBestMacroBackCameraId(): String? {
+        val provider = cameraProvider ?: return null
+
+        return try {
+            val backInfos = provider.availableCameraInfos.filter { isBackCamera(it) }
+
+            // Heuristic: pick the back camera with the highest min focus distance (closest focusing ability).
+            // Many phones expose "macro" capability through an ultrawide or a dedicated module.
+            // Also check for "auxiliary" nature via focal length if available.
+            val best = backInfos
+                .mapNotNull { info ->
+                    val id = cameraIdOf(info) ?: return@mapNotNull null
+                    val mfd = minFocusDistanceOf(info) ?: return@mapNotNull null
+                    id to mfd
+                }
+                .maxByOrNull { (_, mfd) -> mfd }
+
+            // Threshold lowered to 15.0 (approx 6.5cm) to catch more devices
+            if (best != null && best.second >= 15.0f) {
+                return best.first
+            }
+            null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.N)
+    private fun setMacro(enabled: Boolean): Boolean {
+        Log.d("CameraKitPlusView", "setMacro called with enabled: $enabled")
+
+        val lifecycleOwner = getActivity(context) as? LifecycleOwner ?: return true
+
+        if (!enabled) {
+            Log.d("CameraKitPlusView", "Disabling macro mode")
+
+            // turn off macro: restore default back camera and reset zoom
+            macroEnabled = false
+            macroSupported = null
+
+            // restore selector to normal back camera
+            cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+            bindUseCases(lifecycleOwner)
+            resetZoom()
+            methodChannel.invokeMethod("onMacroChanged", buildMacroStatus())
+            return true
+        }
+
+        // 1) Try switching to a macro-capable physical camera (best effort)
+        val macroCameraId = findBestMacroBackCameraId()
+        
+        // Check if we are ALREADY on the best camera
+        val currentCameraId = camera?.let { cameraIdOf(it.cameraInfo) }
+        
+        if (macroCameraId != null) {
+             Log.d("CameraKitPlusView", "Found hardware macro/close-focus lens: $macroCameraId")
+             
+             // If we are not already on it, switch
+             if (currentCameraId != macroCameraId) {
+                try {
+                    cameraSelector = buildSelectorForCameraId(macroCameraId)
+                    macroEnabled = true
+                    bindUseCases(lifecycleOwner)
+                    methodChannel.invokeMethod("onMacroChanged", buildMacroStatus())
+                    // Reset zoom because we are now on a dedicated lens (or wide lens)
+                    resetZoom()
+                    return true
+                } catch (t: Throwable) {
+                    Log.w("CameraKitPlusView", "Macro lens switch failed: ${t.message}")
+                }
+             } else {
+                 // We are already on the best camera. Just enable the macro flags.
+                 Log.d("CameraKitPlusView", "Already on best macro lens ($macroCameraId). Enabling flags.")
+                 macroEnabled = true
+                 bindUseCases(lifecycleOwner)
+                 // If the MFD is really good (>20, i.e. <5cm), we don't need digital zoom.
+                 // If it's borderline (e.g. 15-20), user might want a little zoom, but native is best quality.
+                 // We choose to reset zoom to allow full FOV.
+                 resetZoom()
+                 methodChannel.invokeMethod("onMacroChanged", buildMacroStatus())
+                 return true
+             }
+        }
+
+        // 2) Fallback: If no high-MFD camera found, or switch failed.
+        // We use the current camera (likely main) and simulate macro with digital zoom.
+        Log.d("CameraKitPlusView", "No dedicated macro lens found. Using zoom simulation.")
+        macroEnabled = true
+        // macroSupported will be re-evaluated in bindUseCases, likely false for hardware macro but we are simulating.
+        
+        // Rebind to apply AF_MODE_MACRO if available on current lens
+        bindUseCases(lifecycleOwner)
+
+        try {
+            // Use 2x zoom or similar to simulate "Macro" view
+            setZoom(2f)
+            methodChannel.invokeMethod("onMacroChanged", buildMacroStatus())
+            return true
+        } catch (t: Throwable) {
+            Log.w("CameraKitPlusView", "Zoom fallback failed: ${t.message}")
+            return false
+        }
+    }
+    
+    // New helper to inspect all system cameras including physical ones
+    private fun logCameraManagerInfo() {
+        Log.d("CameraDebug", "===== CameraManager System Service Info =====")
+        try {
+            val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            for (id in manager.cameraIdList) {
+                val chars = manager.getCameraCharacteristics(id)
+                val facing = chars.get(CameraCharacteristics.LENS_FACING)
+                val facingStr = when (facing) {
+                    CameraCharacteristics.LENS_FACING_BACK -> "BACK"
+                    CameraCharacteristics.LENS_FACING_FRONT -> "FRONT"
+                    CameraCharacteristics.LENS_FACING_EXTERNAL -> "EXTERNAL"
+                    else -> "UNKNOWN"
+                }
+
+                // Check if it's a logical camera
+                val caps = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
+                val isLogical = caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)
+                val capsString = caps.joinToString(separator = "\n") {
+                    "• ${capabilityToString(it)}"
+                }
+
+                // Physical IDs if any (API 28+)
+                var physicalIds = "N/A"
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    val pIds = chars.physicalCameraIds
+                    if (!pIds.isEmpty()) {
+                        physicalIds = pIds.toString()
+                    }
+                }
+
+                val minFocus = chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
+
+                Log.d("CameraDebug", "ID: $id | Facing: $facingStr | Logical: $isLogical | Caps: $capsString | Physical: $physicalIds | MinFocus: $minFocus")
+            }
+        } catch (e: Throwable) {
+            Log.e("CameraDebug", "Failed to inspect CameraManager", e)
+        }
+        Log.d("CameraDebug", "============================================")
+    }
+
+    fun capabilityToString(cap: Int): String = when (cap) {
+        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE ->
+            "BACKWARD_COMPATIBLE (basic camera features)"
+
+        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR ->
+            "MANUAL_SENSOR (manual ISO, exposure time)"
+
+        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING ->
+            "MANUAL_POST_PROCESSING (manual WB, color correction)"
+
+        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW ->
+            "RAW (RAW / DNG output)"
+
+        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_PRIVATE_REPROCESSING ->
+            "PRIVATE_REPROCESSING (reprocess private buffers)"
+
+        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_READ_SENSOR_SETTINGS ->
+            "READ_SENSOR_SETTINGS (read-only sensor data)"
+
+        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_BURST_CAPTURE ->
+            "BURST_CAPTURE (high-speed burst shots)"
+
+        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_YUV_REPROCESSING ->
+            "YUV_REPROCESSING (YUV reprocessing support)"
+
+        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DEPTH_OUTPUT ->
+            "DEPTH_OUTPUT (depth / depth map output)"
+
+        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_CONSTRAINED_HIGH_SPEED_VIDEO ->
+            "HIGH_SPEED_VIDEO (slow-motion / high FPS)"
+
+        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MOTION_TRACKING ->
+            "MOTION_TRACKING (motion tracking support)"
+
+        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA ->
+            "LOGICAL_MULTI_CAMERA (multi-lens camera: wide / ultra-wide / tele)"
+
+        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_SECURE_IMAGE_DATA ->
+            "SECURE_IMAGE_DATA (secure capture)"
+
+        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_SYSTEM_CAMERA ->
+            "SYSTEM_CAMERA (system-reserved camera)"
+
+        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_OFFLINE_PROCESSING ->
+            "OFFLINE_PROCESSING (process after capture session closes)"
+
+        else -> "UNKNOWN_CAPABILITY ($cap)"
+    }
+
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun logAllAvailableCameras() {
+        val provider = cameraProvider ?: run {
+            Log.w("CameraDebug", "CameraProvider is null")
+            return
+        }
+
+        Log.d("CameraDebug", "===== Available cameras (CameraX) =====")
+
+        provider.availableCameraInfos.forEachIndexed { index, info ->
+            try {
+                val c2 = Camera2CameraInfo.from(info)
+
+                val cameraId = c2.cameraId
+
+                val lensFacing = c2.getCameraCharacteristic(
+                    CameraCharacteristics.LENS_FACING
+                )
+
+                val facingStr = when (lensFacing) {
+                    CameraCharacteristics.LENS_FACING_BACK -> "BACK"
+                    CameraCharacteristics.LENS_FACING_FRONT -> "FRONT"
+                    CameraCharacteristics.LENS_FACING_EXTERNAL -> "EXTERNAL"
+                    else -> "UNKNOWN"
+                }
+
+                val focalLengths = c2.getCameraCharacteristic(
+                    CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS
+                )?.joinToString()
+
+                val minFocusDistance = c2.getCameraCharacteristic(
+                    CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE
+                )
+
+                val afModes = c2.getCameraCharacteristic(
+                    CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES
+                )?.joinToString()
+
+                val capabilities = c2.getCameraCharacteristic(
+                    CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES
+                ) ?: intArrayOf()
+
+                val isLogicalMultiCamera =
+                    capabilities.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)
+
+                Log.d(
+                    "CameraDebug",
+                    """
+                Camera #$index
+                ├─ cameraId: $cameraId
+                ├─ facing: $facingStr
+                ├─ focalLengths: $focalLengths
+                ├─ minFocusDistance: $minFocusDistance
+                ├─ AF modes: $afModes
+                └─ logicalMultiCamera: $isLogicalMultiCamera
+                """.trimIndent()
+                )
+
+            } catch (t: Throwable) {
+                Log.w("CameraDebug", "Failed to read camera #$index: ${t.message}")
+            }
+        }
+
+        Log.d("CameraDebug", "===== End camera list =====")
+    }
+
 }

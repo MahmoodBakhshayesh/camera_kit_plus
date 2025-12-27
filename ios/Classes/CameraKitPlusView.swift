@@ -12,6 +12,15 @@ import Vision
 import CoreGraphics
 import AudioToolbox
 
+class CameraContainerView: UIView {
+    var onLayoutSubviews: (() -> Void)?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onLayoutSubviews?()
+    }
+}
+
 @available(iOS 13.0, *)
 class CameraKitPlusView: NSObject,
     FlutterPlatformView,
@@ -20,7 +29,7 @@ class CameraKitPlusView: NSObject,
     AVCaptureVideoDataOutputSampleBufferDelegate
 {
     // MARK: - UI / Session
-    private var _view: UIView
+    private var _view: CameraContainerView
     var captureSession = AVCaptureSession()
     var captureDevice: AVCaptureDevice!
     private var previewLayer: AVCaptureVideoPreviewLayer?
@@ -75,9 +84,14 @@ class CameraKitPlusView: NSObject,
 
     // MARK: - Lifecycle
     init(frame: CGRect, messenger: FlutterBinaryMessenger) {
-        _view = UIView(frame: frame)
+        let container = CameraContainerView(frame: frame)
+        _view = container
         _view.backgroundColor = .black
         super.init()
+        
+        container.onLayoutSubviews = { [weak self] in
+            self?.ensurePreviewLayer()
+        }
 
         setupAVCapture_bootstrapDevice()
         setupCamera()

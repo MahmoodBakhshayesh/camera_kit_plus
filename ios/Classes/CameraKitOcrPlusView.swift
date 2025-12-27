@@ -5,387 +5,302 @@ import AVFoundation
 import MLKitTextRecognition
 import MLKitVision
 
-final class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOutputSampleBufferDelegate {
+class CameraOcrContainerView: UIView {
+    var onLayoutSubviews: (() -> Void)?
 
-    // MARK: - Flutter / UI
-    private let _view: UIView
-    private var channel: FlutterMethodChannel?
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onLayoutSubviews?()
+    }
+}
 
-    // MARK: - Camera
-    private let captureSession = AVCaptureSession()
-    private var captureDevice: AVCaptureDevice?
-    private var videoInput: AVCaptureDeviceInput?
-    private let videoOutput = AVCaptureVideoDataOutput()
+class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOutputSampleBufferDelegate {
+    private var _view: CameraOcrContainerView
+    var captureSession = AVCaptureSession()
+    var captureDevice: AVCaptureDevice!
     private var previewLayer: AVCaptureVideoPreviewLayer?
-
-    // MARK: - State
+    private var channel: FlutterMethodChannel?
     var initCameraFinished: Bool! = false
-    var cameraID = 0 // 0 back, 1 front
-
-    // MARK: - MLKit
+    var cameraID = 0
     var textRecognizer: TextRecognizer
-
-    // MARK: - Zoom
+    
     private var minZoomFactor: CGFloat = 1.0
     private var lastZoomFactor: CGFloat = 1.0
     private var maxZoomFactor: CGFloat {
+        // Cap to something reasonable for quality; you can raise it if you want
         return min(self.captureDevice?.activeFormat.videoMaxZoomFactor ?? 1.0, 8.0)
     }
 
-    // MARK: - Init
     init(frame: CGRect, messenger: FlutterBinaryMessenger) {
-        _view = UIView(frame: frame)
-        _view.backgroundColor = .black
+        _view = CameraOcrContainerView(frame: frame)
+        _view.backgroundColor = UIColor.black
         _view.isUserInteractionEnabled = true
-
-        textRecognizer = TextRecognizer.textRecognizer()
-
+        
+        textRecognizer = TextRecognizer.textRecognizer() // Initialize the text recognizer
         super.init()
-
+        
+        _view.onLayoutSubviews = { [weak self] in
+            self?.ensurePreviewLayer()
+        }
+        
         attachZoomGesturesIfNeeded()
-
+        setupAVCapture()
+        setupCamera()
         channel = FlutterMethodChannel(name: "camera_kit_plus", binaryMessenger: messenger)
         channel?.setMethodCallHandler(handle)
-
-        setupAVCapture()
-        setupCamera(cameraID: 0)
-        startSession()
-        startOrientationObservers()
+        
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(handleOrientationChange),
+                                               name: UIDevice.orientationDidChangeNotification,
+                                               object: nil)
     }
-
+    
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
+    
+    private func createNativeView() {
+        let screenSize = UIScreen.main.bounds
+        let label = UILabel()
+        label.textAlignment = .center
+        label.textColor = UIColor.blue
+        label.frame = CGRect(x: 0, y: 0, width: screenSize.width, height: screenSize.height)
+        label.autoresizingMask = [.flexibleWidth, .flexibleTopMargin, .flexibleBottomMargin]
+        label.center = _view.center // Center the label within _view
+        label.textColor = UIColor.blue
+        _view.addSubview(label)
 
-    func view() -> UIView { _view }
+    }
 
-    // MARK: - Flutter channel
+    func view() -> UIView {
+        return _view
+    }
+
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-        let args = call.arguments as? [String: Any]
-
+        let args = call.arguments
+        let myArgs = args as? [String: Any]
         switch call.method {
         case "getCameraPermission":
-            requestCameraPermission(result: result)
-
+            self.requestCameraPermission(result: result)
+            break
         case "initCamera":
-            // kept for compatibility
-            result(true)
-
+            break
         case "switchCamera":
-            let id = (args?["cameraID"] as? Int) ?? 0
-            switchCamera(cameraID: id, result: result)
-
+            let cameraID = (myArgs?["cameraID"] as! Int)
+            self.switchCamera(cameraID: cameraID, result: result)
+            break
         case "pauseCamera":
-            pauseCamera(result: result)
-
+            self.pauseCamera(result: result)
+            break
         case "resumeCamera":
-            resumeCamera(result: result)
-
+            self.resumeCamera(result: result)
+            break
         case "setZoom":
-            if let z = args?["zoom"] as? Double {
-                setZoom(factor: CGFloat(z), animated: true)
-                result(true)
-            } else {
-                result(FlutterError(code: "bad_args", message: "zoom (double) is required", details: nil))
-            }
-
+              if let z = myArgs?["zoom"] as? Double {
+                  self.setZoom(factor: CGFloat(z), animated: true)
+                  result(true)
+              } else {
+                  result(FlutterError(code: "bad_args", message: "zoom (double) is required", details: nil))
+              }
         case "resetZoom":
-            setZoom(factor: 1.0, animated: true)
-            result(true)
-
+              self.setZoom(factor: 1.0, animated: true)
+              result(true)
         default:
             result(false)
         }
     }
 
-    func requestCameraPermission(result: @escaping FlutterResult) {
+    func requestCameraPermission(result:  @escaping FlutterResult) {
         if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
             UIApplication.shared.open(settingsURL)
+            print(settingsURL)
             result(true)
-        } else {
-            result(false)
         }
     }
 
-    // MARK: - AVCapture setup
-    private func setupAVCapture() {
-        captureSession.beginConfiguration()
-        captureSession.sessionPreset = .high
-        captureSession.commitConfiguration()
-
-        // output config once
-        videoOutput.alwaysDiscardsLateVideoFrames = true
-        videoOutput.videoSettings = [
-            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
-        ]
-        videoOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "videoQueue"))
+    func setupAVCapture() {
+        captureSession.sessionPreset = AVCaptureSession.Preset.high
+        captureDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
     }
 
-    private func setupCamera(cameraID: Int) {
-        self.cameraID = cameraID
+    private func setupCamera() {
+        print("Setting up the camera...")
+
+        // Initialize the capture device
+        captureDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
         lastZoomFactor = 1.0
 
-        captureSession.beginConfiguration()
-
-        // Remove previous input
-        if let input = videoInput {
-            captureSession.removeInput(input)
-            videoInput = nil
-        }
-
-        // Remove previous output (we will add again safely)
-        if captureSession.outputs.contains(videoOutput) {
-            captureSession.removeOutput(videoOutput)
-        }
-
-        let position: AVCaptureDevice.Position = (cameraID == 0) ? .back : .front
-        let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position)
-        captureDevice = device
-
-        guard let captureDevice else {
+        if captureDevice == nil {
             print("Error: captureDevice is nil.")
-            captureSession.commitConfiguration()
+            return
+        }
+        print("captureDevice initialized: \(captureDevice!)")
+
+        // Configure camera input
+        let videoInput: AVCaptureDeviceInput
+        do {
+            videoInput = try AVCaptureDeviceInput(device: captureDevice)
+        } catch {
+            print("Failed to set up camera input: \(error)")
             return
         }
 
-        do {
-            let input = try AVCaptureDeviceInput(device: captureDevice)
-            if captureSession.canAddInput(input) {
-                captureSession.addInput(input)
-                videoInput = input
-            } else {
-                print("Could not add video input to session")
-            }
-        } catch {
-            print("Failed to create AVCaptureDeviceInput: \(error)")
+        if captureSession.canAddInput(videoInput) {
+            captureSession.addInput(videoInput)
+        } else {
+            print("Could not add video input to session")
+            return
         }
 
+        // Configure video output
+        let videoOutput = AVCaptureVideoDataOutput()
+        videoOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "videoQueue"))
         if captureSession.canAddOutput(videoOutput) {
             captureSession.addOutput(videoOutput)
         } else {
             print("Could not add video output to session")
+            return
         }
 
-        // ✅ Preview layer should be created once and kept
-        if previewLayer == nil {
-            let pl = AVCaptureVideoPreviewLayer(session: captureSession)
-            pl.videoGravity = .resizeAspectFill
-            pl.frame = _view.bounds
-            _view.layer.masksToBounds = true
-            _view.layer.addSublayer(pl)
-            previewLayer = pl
-        } else {
-            previewLayer?.session = captureSession
-            previewLayer?.frame = _view.bounds
-        }
-
-        captureSession.commitConfiguration()
-
-        // Apply correct orientation immediately
-        DispatchQueue.main.async { [weak self] in
-            self?.updateConnectionsOrientation()
-        }
+        // Preview layer will be handled by ensurePreviewLayer
+        ensurePreviewLayer()
+        startSession()
     }
 
-    private func startSession() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+    func startSession() {
+        DispatchQueue.main.async {
             if !self.captureSession.isRunning {
                 self.captureSession.startRunning()
             }
-            self.layoutPreviewToBounds()
-            self.updateConnectionsOrientation()
+        }
+    }
+    
+    private func ensurePreviewLayer() {
+        if previewLayer == nil {
+            let pl = AVCaptureVideoPreviewLayer(session: self.captureSession)
+            pl.videoGravity = .resizeAspectFill
+            pl.frame = self._view.bounds
+            self._view.layer.addSublayer(pl)
+            self.previewLayer = pl
+        } else {
+            previewLayer?.frame = self._view.bounds
+        }
+        updateVideoOrientation()
+    }
+
+    private func updateVideoOrientation() {
+        guard let conn = previewLayer?.connection, conn.isVideoOrientationSupported else { return }
+        switch UIDevice.current.orientation {
+        case .landscapeLeft:  conn.videoOrientation = .landscapeRight
+        case .landscapeRight: conn.videoOrientation = .landscapeLeft
+        case .portraitUpsideDown: conn.videoOrientation = .portraitUpsideDown
+        default: conn.videoOrientation = .portrait
+        }
+    }
+    
+    @objc private func handleOrientationChange() {
+        DispatchQueue.main.async {
+            self.updateVideoOrientation()
+            self.ensurePreviewLayer()
         }
     }
 
+    func switchCamera(cameraID: Int, result: @escaping FlutterResult) {
+        captureSession.stopRunning()
+        self.cameraID = cameraID
+        captureDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: cameraID == 0 ? .back : .front)
+        
+        // Remove existing inputs/outputs to reset
+        for input in captureSession.inputs { captureSession.removeInput(input) }
+        for output in captureSession.outputs { captureSession.removeOutput(output) }
+        
+        setupCamera() // re-setup
+        result(true)
+    }
+
     func pauseCamera(result: @escaping FlutterResult) {
-        if captureSession.isRunning {
-            captureSession.stopRunning()
-        }
+        captureSession.stopRunning()
         result(true)
     }
 
     func resumeCamera(result: @escaping FlutterResult) {
-        if !captureSession.isRunning {
-            captureSession.startRunning()
-        }
-        DispatchQueue.main.async { [weak self] in
-            self?.updateConnectionsOrientation()
-        }
+        captureSession.startRunning()
         result(true)
+    }
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+        let visionImage = VisionImage(buffer: sampleBuffer)
+        visionImage.orientation = imageOrientation()
+
+        textRecognizer.process(visionImage) { result, error in
+            guard error == nil, let result = result else {
+                // print("Error recognizing text: \(String(describing: error))")
+                return
+            }
+
+            if(result.text != "") {
+                var listLineModel: [LineModel] = []
+
+                for b in result.blocks {
+                    for l in b.lines{
+                        let lineModel : LineModel = LineModel()
+                        lineModel.text = l.text
+
+                        for c in l.cornerPoints {
+                            lineModel.cornerPoints.append(CornerPointModel(x: c.cgPointValue.x, y: c.cgPointValue.y))
+                        }
+
+                        listLineModel.append(lineModel)
+                    }
+                }
+
+                self.onTextRead(text: result.text, values: listLineModel, path: "", orientation:  visionImage.orientation.rawValue)
+
+            } else {
+
+                self.onTextRead(text: "", values: [], path: "", orientation:  nil)
+            }
+        }
+    }
+
+    private func imageOrientation() -> UIImage.Orientation {
+        switch UIDevice.current.orientation {
+        case .portrait:
+            return .right
+        case .landscapeLeft:
+            return .up
+        case .landscapeRight:
+            return .down
+        case .portraitUpsideDown:
+            return .left
+        default:
+            return .right
+        }
     }
 
     func dispose() {
-        stopOrientationObservers()
-        if captureSession.isRunning { captureSession.stopRunning() }
+        captureSession.stopRunning()
     }
 
-    func switchCamera(cameraID: Int, result: @escaping FlutterResult) {
-        if captureSession.isRunning { captureSession.stopRunning() }
-        setupCamera(cameraID: cameraID)
-        startSession()
-        result(true)
-    }
 
-    // MARK: - Rotation / Orientation (FIX)
-    private func startOrientationObservers() {
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(onDeviceOrientationChanged),
-                                               name: UIDevice.orientationDidChangeNotification,
-                                               object: nil)
+    func onTextRead(text: String, values: [LineModel], path: String?, orientation: Int?) {
+        let data = OcrData(text: text, path: path, orientation: orientation, lines: values)
+        let jsonEncoder = JSONEncoder()
+        guard let jsonData = try? jsonEncoder.encode(data) else { return }
+        let json = String(data: jsonData, encoding: String.Encoding.utf8)
 
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(onAppDidBecomeActive),
-                                               name: UIApplication.didBecomeActiveNotification,
-                                               object: nil)
-    }
-
-    private func stopOrientationObservers() {
-        NotificationCenter.default.removeObserver(self, name: UIDevice.orientationDidChangeNotification, object: nil)
-        NotificationCenter.default.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
-    }
-
-    @objc private func onDeviceOrientationChanged() {
-        // When user unlocks rotation, device orientation changes,
-        // but your Flutter UI may stay landscape. We must follow **interface orientation**
+        // 🔐 Ensure channel call is always on the main thread
         DispatchQueue.main.async { [weak self] in
-            self?.layoutPreviewToBounds()
-            self?.updateConnectionsOrientation()
+            guard let self = self else { return }
+            self.channel?.invokeMethod("onTextRead", arguments: json)
         }
     }
 
-    @objc private func onAppDidBecomeActive() {
-        DispatchQueue.main.async { [weak self] in
-            self?.layoutPreviewToBounds()
-            self?.updateConnectionsOrientation()
-        }
-    }
 
-    private func layoutPreviewToBounds() {
-        previewLayer?.frame = _view.bounds
-    }
-
-    /// Use the *current interface orientation* (windowScene) to drive preview + output orientation.
-    private func currentInterfaceOrientation() -> UIInterfaceOrientation {
-        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-            return scene.interfaceOrientation
-        }
-        // fallback
-        return .portrait
-    }
-
-    private func avVideoOrientation(from io: UIInterfaceOrientation) -> AVCaptureVideoOrientation {
-        // Mapping is not 1:1 (camera coordinates vs interface), but this is the standard mapping for preview/output.
-        switch io {
-        case .portrait: return .portrait
-        case .portraitUpsideDown: return .portraitUpsideDown
-        case .landscapeLeft: return .landscapeLeft
-        case .landscapeRight: return .landscapeRight
-        default: return .portrait
-        }
-    }
-
-    /// Apply same orientation to preview + video output connection.
-    private func updateConnectionsOrientation() {
-        let io = currentInterfaceOrientation()
-        let vo = avVideoOrientation(from: io)
-
-        // Preview
-        if let c = previewLayer?.connection, c.isVideoOrientationSupported {
-            c.videoOrientation = vo
-        }
-
-        // Output
-        if let c = videoOutput.connection(with: .video), c.isVideoOrientationSupported {
-            c.videoOrientation = vo
-        }
-
-        // If using front camera, you may want mirrored preview
-        if let c = previewLayer?.connection, c.isVideoMirroringSupported {
-            c.automaticallyAdjustsVideoMirroring = false
-            c.isVideoMirrored = (cameraID == 1)
-        }
-        if let c = videoOutput.connection(with: .video), c.isVideoMirroringSupported {
-            c.automaticallyAdjustsVideoMirroring = false
-            c.isVideoMirrored = (cameraID == 1)
-        }
-    }
-
-    // MARK: - MLKit orientation (FIX)
-    /// MLKit VisionImage orientation must match how the pixels should be interpreted.
-    /// Use **interface orientation** (not UIDevice orientation), otherwise iPad unlocked rotation breaks scanning.
-    private func visionImageOrientation() -> UIImage.Orientation {
-        let io = currentInterfaceOrientation()
-        let isFront = (cameraID == 1)
-
-        // These mappings are the commonly used MLKit mappings for AVCapture buffers.
-        // Front camera needs mirrored variants.
-        switch io {
-        case .portrait:
-            return isFront ? .leftMirrored : .right
-        case .portraitUpsideDown:
-            return isFront ? .rightMirrored : .left
-        case .landscapeLeft:
-            // home button/right side (depends device) — using interface orientation is the key
-            return isFront ? .downMirrored : .up
-        case .landscapeRight:
-            return isFront ? .upMirrored : .down
-        default:
-            return isFront ? .leftMirrored : .right
-        }
-    }
-
-    // MARK: - SampleBuffer delegate
-    func captureOutput(_ output: AVCaptureOutput,
-                       didOutput sampleBuffer: CMSampleBuffer,
-                       from connection: AVCaptureConnection) {
-
-        // Create VisionImage from sampleBuffer
-        let visionImage = VisionImage(buffer: sampleBuffer)
-        visionImage.orientation = visionImageOrientation()
-
-        textRecognizer.process(visionImage) { [weak self] result, error in
-            guard let self else { return }
-
-            guard error == nil, let result = result else {
-                // keep silent in production; but keep your debug
-                // print("Error recognizing text: \(String(describing: error))")
-                self.onTextRead(text: "", values: [], path: "", orientation: nil)
-                return
-            }
-
-            if result.text.isEmpty {
-                self.onTextRead(text: "", values: [], path: "", orientation: nil)
-                return
-            }
-
-            var listLineModel: [LineModel] = []
-            for b in result.blocks {
-                for l in b.lines {
-                    let lineModel = LineModel()
-                    lineModel.text = l.text
-                    for c in l.cornerPoints {
-                        lineModel.cornerPoints.append(
-                            CornerPointModel(x: c.cgPointValue.x, y: c.cgPointValue.y)
-                        )
-                    }
-                    listLineModel.append(lineModel)
-                }
-            }
-
-            self.onTextRead(
-                text: result.text,
-                values: listLineModel,
-                path: "",
-                orientation: visionImage.orientation.rawValue
-            )
-        }
-    }
-
-    // MARK: - Zoom gestures (unchanged functionality)
     private func attachZoomGesturesIfNeeded() {
         guard _view.gestureRecognizers?.isEmpty ?? true else { return }
-
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
         _view.addGestureRecognizer(pinch)
 
@@ -396,12 +311,11 @@ final class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoD
 
     @objc private func handlePinch(_ pinch: UIPinchGestureRecognizer) {
         guard let device = self.captureDevice else { return }
-
         switch pinch.state {
         case .began:
             lastZoomFactor = device.videoZoomFactor
-
         case .changed:
+            // Compute new factor from the pinch scale
             var newFactor = lastZoomFactor * pinch.scale
             newFactor = max(minZoomFactor, min(newFactor, maxZoomFactor))
             do {
@@ -411,18 +325,22 @@ final class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoD
             } catch {
                 print("Zoom lock error: \(error)")
             }
-
         case .ended, .cancelled, .failed:
+            // Optionally smooth to a clamped value at the end
             let target = max(minZoomFactor, min(device.videoZoomFactor, maxZoomFactor))
             do {
                 try device.lockForConfiguration()
-                device.ramp(toVideoZoomFactor: target, withRate: 8.0)
+                if device.responds(to: #selector(setter: AVCaptureDevice.videoZoomFactor)) {
+                    // Smooth ramp (0.2s approx) if supported
+                    device.ramp(toVideoZoomFactor: target, withRate: 8.0)
+                } else {
+                    device.videoZoomFactor = target
+                }
                 device.unlockForConfiguration()
             } catch {
                 print("Zoom end lock error: \(error)")
             }
             lastZoomFactor = target
-
         default:
             break
         }
@@ -434,7 +352,6 @@ final class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoD
 
     private func setZoom(factor: CGFloat, animated: Bool = true) {
         guard let device = self.captureDevice else { return }
-
         let clamped = max(minZoomFactor, min(factor, maxZoomFactor))
         do {
             try device.lockForConfiguration()
@@ -444,9 +361,9 @@ final class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoD
                 device.videoZoomFactor = clamped
             }
             device.unlockForConfiguration()
-
             lastZoomFactor = clamped
 
+            // 🔐 Ensure channel call is always on the main thread
             DispatchQueue.main.async { [weak self] in
                 self?.channel?.invokeMethod("onZoomChanged", arguments: factor)
             }
@@ -455,39 +372,32 @@ final class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoD
             print("setZoom error: \(error)")
         }
     }
-
-    // MARK: - Send results to Flutter
-    func onTextRead(text: String, values: [LineModel], path: String?, orientation: Int?) {
-        let data = OcrData(text: text, path: path, orientation: orientation, lines: values)
-        let jsonEncoder = JSONEncoder()
-        let jsonData = try! jsonEncoder.encode(data)
-        let json = String(data: jsonData, encoding: .utf8)
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.channel?.invokeMethod("onTextRead", arguments: json)
-        }
-    }
 }
 
-// MARK: - Models (unchanged)
+
 struct OcrData: Codable {
     var text: String?
     var path: String?
     var orientation: Int?
-    var lines: [LineModel] = []
+    var lines: [LineModel]=[]
 }
 
-final class LineModel: Codable {
-    var text: String = ""
-    var cornerPoints: [CornerPointModel] = []
+// Encode
+
+
+class LineModel: Codable {
+    var text:String = ""
+    var cornerPoints : [CornerPointModel] = []
 }
 
-final class CornerPointModel: Codable {
-    init(x: CGFloat, y: CGFloat) {
+
+class CornerPointModel: Codable {
+    
+    init(x:CGFloat, y:CGFloat) {
         self.x = x
         self.y = y
     }
-    var x: CGFloat
-    var y: CGFloat
+    
+    var x:CGFloat
+    var y:CGFloat
 }

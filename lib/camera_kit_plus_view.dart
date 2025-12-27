@@ -220,8 +220,8 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView> with WidgetsBindi
   Future<dynamic> _methodCallHandler(MethodCall methodCall) async {
     try {
       if (methodCall.method == "onBarcodeScanned") {
-        // String barcode = methodCall.arguments.toString();
-        // widget.onBarcodeRead?.call(barcode);
+        String barcode = methodCall.arguments.toString();
+        widget.onBarcodeRead?.call(barcode);
       }
       if (methodCall.method == "onBarcodeDataScanned") {
         String barcodeJson = methodCall.arguments.toString();
@@ -261,19 +261,15 @@ class _CameraKitPlusViewState extends State<CameraKitPlusView> with WidgetsBindi
     if (isVisible) {
       // print("object visible");
       paused = false;
-      Future((){
-        if (mounted) {
-          setState(() {});
-        }
-      });
+      if (mounted) {
+        setState(() {});
+      }
       // controller.resumeCamera();
     } else {
       paused = true;
-      Future((){
-        if (mounted) {
-          setState(() {});
-        }
-      });
+      if (mounted) {
+        setState(() {});
+      }
       // print("object not visible");
       // controller.pauseCamera();
     }

@@ -8,6 +8,15 @@ import MLKitTextRecognition
 import MLKitCommon
 import MLKitVision
 
+class CameraOcrViewContainer: UIView {
+    var onLayoutSubviews: (() -> Void)?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onLayoutSubviews?()
+    }
+}
+
 @available(iOS 13.0, *)
 class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDelegate, AVCaptureVideoDataOutputSampleBufferDelegate {
     private var _view: UIView
@@ -20,7 +29,7 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     var isFillScale:Bool!
     var flashMode:AVCaptureDevice.FlashMode!
     var cameraPosition: AVCaptureDevice.Position! = .back
-    var previewView : UIView!
+    var previewView : CameraOcrViewContainer!
     var videoDataOutput: AVCaptureVideoDataOutput!
     var videoDataOutputQueue: DispatchQueue!
     var photoOutput: AVCapturePhotoOutput?
@@ -40,6 +49,8 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     private var prevAudioMode: AVAudioSession.Mode?
     private var prevAudioOptions: AVAudioSession.CategoryOptions = []
     private var didChangeAudioSession = false
+    // New optional feature toggle
+    var showTextRectangles: Bool = false
 
 
     /// 0:camera 1:barcodeScanner 2:ocrReader
@@ -71,17 +82,35 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
 
         super.init()
         self.flashMode = .off // default to safe value
+        
+        // Parse showTextRectangles from arguments
+        if let myArgs = args as? [String: Any],
+           let showRects = myArgs["showTextRectangles"] as? Bool {
+            self.showTextRectangles = showRects
+        }
 
         self.channel.setMethodCallHandler(handle)
         createNativeView(view: _view)
         setupCamera()
         channel = FlutterMethodChannel(name: "camera_kit_plus", binaryMessenger: messenger!)
         channel.setMethodCallHandler(handle)
+        
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(handleOrientationChange),
+                                               name: UIDevice.orientationDidChangeNotification,
+                                               object: nil)
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     func view() -> UIView {
         if previewView == nil {
-            self.previewView = UIView(frame: frame)
+            self.previewView = CameraOcrViewContainer(frame: frame)
+            self.previewView.onLayoutSubviews = { [weak self] in
+                self?.updatePreviewLayout()
+            }
         }
         previewView.isUserInteractionEnabled = true
         attachZoomGesturesIfNeeded()
@@ -98,6 +127,33 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             previewView.addSubview(overlayView)
         }
         return previewView
+    }
+    
+    private func updatePreviewLayout() {
+        guard let pl = previewLayer else { return }
+        pl.frame = previewView.bounds
+        updateVideoOrientation()
+        layoutOverlaysToPreviewBounds()
+    }
+
+    private func updateVideoOrientation() {
+        guard let conn = previewLayer?.connection, conn.isVideoOrientationSupported else { return }
+        switch interfaceOrientation() {
+        case .landscapeLeft:
+            conn.videoOrientation = .landscapeLeft
+        case .landscapeRight:
+            conn.videoOrientation = .landscapeRight
+        case .portraitUpsideDown:
+            conn.videoOrientation = .portraitUpsideDown
+        default:
+            conn.videoOrientation = .portrait
+        }
+    }
+    
+    @objc private func handleOrientationChange() {
+        DispatchQueue.main.async {
+            self.updatePreviewLayout()
+        }
     }
     
     private func layoutOverlaysToPreviewBounds() {
@@ -175,6 +231,11 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         case "setMacro":
             let enabled = (myArgs?["enabled"] as? Bool) ?? false
             self.setMacro(enabled: enabled)
+            result(true)
+            
+        case "setShowTextRectangles":
+            let show = (myArgs?["show"] as? Bool) ?? false
+            self.showTextRectangles = show
             result(true)
 
         default:
@@ -307,21 +368,40 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
 
     func startSession(isFirst: Bool) {
         DispatchQueue.main.async {
+            // Ensure view is created
+            if self.previewView == nil {
+                 // Should not happen if view() was called, but safety check
+                 _ = self.view()
+            }
             let rootLayer :CALayer = self.previewView.layer
             rootLayer.masksToBounds = true
+            
+            // If view has no size yet, retry later
             if(rootLayer.bounds.size.width != 0 && rootLayer.bounds.size.width != 0){
                 self.previewLayer.frame = rootLayer.bounds
+                self.updateVideoOrientation() // Set initial orientation correctly
                 self.layoutOverlaysToPreviewBounds()
 
-                rootLayer.addSublayer(self.previewLayer)
-                self.session.startRunning()
+                // Check if already added
+                if self.previewLayer.superlayer == nil {
+                    rootLayer.addSublayer(self.previewLayer)
+                    
+                    // Add overlay view on top of preview layer
+                    if self.overlayView != nil {
+                        self.previewView.bringSubviewToFront(self.overlayView)
+                    }
+                }
+                
+                if !self.session.isRunning {
+                    self.session.startRunning()
+                }
                 if isFirst == true {
                     DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) {
                         self.initCameraFinished = true
                     }
                 }
             } else {
-                DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
                     self.startSession(isFirst: isFirst)
                 }
             }
@@ -572,60 +652,6 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
         }
         tick()
     }
-
-    // -------------------------
-    // OCR (camera frames)
-    // -------------------------
-//    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-//        guard let tr = textRecognizer else { return }
-//
-//        let visionImage = VisionImage(buffer: sampleBuffer)
-//        let base = imageOrientation(fromDevicePosition: cameraPosition)
-//        visionImage.orientation = rotate(base, turns: forcedQuarterTurns)
-//
-//        do {
-//            let result = try tr.results(in: visionImage)
-//            let txt = result.text
-//
-//            var listLineModel: [LineModel] = []
-//            if !txt.isEmpty {
-//                for b in result.blocks {
-//                    for l in b.lines {
-//                        let lineModel = LineModel()
-//                        lineModel.text = l.text
-//                        for c in l.cornerPoints {
-//                            lineModel.cornerPoints.append(
-//                                CornerPointModel(x: c.cgPointValue.x, y: c.cgPointValue.y)
-//                            )
-//                        }
-//                        listLineModel.append(lineModel)
-//                    }
-//                }
-//            }
-//
-//            // ----- draw overlays -----
-//            let imgSize = self.lastFrameImageSize
-//            DispatchQueue.main.async {
-//                if !txt.isEmpty && imgSize != .zero {
-//                    self.drawOverlays(for: listLineModel,
-//                                      imageSize: imgSize,
-//                                      turns: self.forcedQuarterTurns)
-//                } else {
-//                    self.clearOverlays()
-//                }
-//            }
-//            // -------------------------
-//
-//            if !txt.isEmpty {
-//                self.onTextRead(text: txt, values: listLineModel, path: "", orientation: visionImage.orientation.rawValue)
-//            } else {
-//                self.onTextRead(text: "", values: [], path: "", orientation: nil)
-//            }
-//
-//        } catch {
-//            print("can't fetch result: \(error)")
-//        }
-//    }
 
     func onBarcodeRead(barcode: String) {
         channel.invokeMethod("onBarcodeRead", arguments: barcode)
@@ -1161,9 +1187,13 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
             let imgSize = self.lastFrameImageSize
             DispatchQueue.main.async {
                 if !txt.isEmpty && imgSize != .zero {
-                    self.drawOverlays(for: listLineModel,
-                                      imageSize: imgSize,
-                                      turns: self.forcedQuarterTurns)
+                    if self.showTextRectangles {
+                        self.drawOverlays(for: listLineModel,
+                                          imageSize: imgSize,
+                                          turns: self.forcedQuarterTurns)
+                    } else {
+                        self.clearOverlays()
+                    }
                 } else {
                     self.clearOverlays()
                 }
@@ -1225,4 +1255,3 @@ class CameraKitOcrView: NSObject, FlutterPlatformView, AVCapturePhotoCaptureDele
     // =======================================
 
 }
- 

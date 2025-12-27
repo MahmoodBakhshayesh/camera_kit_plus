@@ -49,7 +49,7 @@ class MethodChannelCameraKitPlus extends CameraKitPlusPlatform {
 
   @override
   Future<String?> takePicture() async {
-    final permission = await methodChannel.invokeMethod<String>('takePicture',{'path':''});
+    final permission = await methodChannel.invokeMethod<String>('takePicture', {'path': ''});
 
     return permission;
   }
@@ -77,9 +77,27 @@ class MethodChannelCameraKitPlus extends CameraKitPlusPlatform {
 
   @override
   Future<bool?> setMacro(bool macro) async {
-    final zoomChange = await methodChannel.invokeMethod<bool>('setMacro',{"enabled":macro});
+    bool? macroChanged;
+    try {
+      macroChanged = await methodChannel.invokeMethod<bool>('setMacro', {"enabled": macro});
+    } catch (e) {
+      print('setMacro: Error in try block:\n${e.toString()}');
+      macroChanged = false;
+    }
 
-    return zoomChange;
+    return macroChanged;
+  }
+
+  @override
+  Future<bool?> setShowTextRectangles(bool show) async {
+    bool? changed;
+    try {
+      changed = await methodChannel.invokeMethod<bool>('setShowTextRectangles', {"show": show});
+    } catch (e) {
+      print('setShowTextRectangles: Error:\n${e.toString()}');
+      changed = false;
+    }
+    return changed;
   }
 
 // await channel.invokeMethod('setOcrRotation', {'degrees': 90}); // rotate CW 90°

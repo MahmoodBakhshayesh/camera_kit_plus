@@ -68,4 +68,8 @@ abstract class CameraKitPlusPlatform extends PlatformInterface {
     throw UnimplementedError('setMacro not been implemented.');
   }
 
+  Future<bool?> setShowTextRectangles(bool show) {
+    throw UnimplementedError('setShowTextRectangles not been implemented.');
+  }
+
 }

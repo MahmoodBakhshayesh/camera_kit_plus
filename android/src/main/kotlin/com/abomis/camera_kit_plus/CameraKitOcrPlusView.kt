@@ -479,6 +479,7 @@ class CameraKitOcrPlusView(context: Context, messenger: BinaryMessenger) :
 
             // === New: Zoom API parity with iOS ===
             "setZoom" -> {
+                Log.d("OCR", "Zoom")
                 val z = call.argument<Double>("zoom")
                 if (z != null) {
                     setZoom(z.toFloat())
@@ -495,6 +496,7 @@ class CameraKitOcrPlusView(context: Context, messenger: BinaryMessenger) :
 
             // === New: Macro toggle parity with iOS ===
             "setMacro" -> {
+                Log.d("OCR", "Macro")
                 val enabled = call.argument<Boolean>("enabled") ?: false
                 setMacro(enabled)
                 result.success(true)
