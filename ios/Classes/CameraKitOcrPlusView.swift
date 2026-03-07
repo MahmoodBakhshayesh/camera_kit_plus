@@ -7,10 +7,16 @@ import MLKitVision
 
 class CameraOcrContainerView: UIView {
     var onLayoutSubviews: (() -> Void)?
+    var onVisibilityChanged: ((Bool) -> Void)?
 
     override func layoutSubviews() {
         super.layoutSubviews()
         onLayoutSubviews?()
+    }
+    
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        onVisibilityChanged?(window != nil)
     }
 }
 
@@ -27,7 +33,6 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
     private var minZoomFactor: CGFloat = 1.0
     private var lastZoomFactor: CGFloat = 1.0
     private var maxZoomFactor: CGFloat {
-        // Cap to something reasonable for quality; you can raise it if you want
         return min(self.captureDevice?.activeFormat.videoMaxZoomFactor ?? 1.0, 8.0)
     }
 
@@ -36,11 +41,19 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
         _view.backgroundColor = UIColor.black
         _view.isUserInteractionEnabled = true
         
-        textRecognizer = TextRecognizer.textRecognizer() // Initialize the text recognizer
+        textRecognizer = TextRecognizer.textRecognizer()
         super.init()
         
         _view.onLayoutSubviews = { [weak self] in
             self?.ensurePreviewLayer()
+        }
+        
+        _view.onVisibilityChanged = { [weak self] isVisible in
+            if isVisible {
+                self?.resumeCamera(result: {_ in })
+            } else {
+                self?.pauseCamera(result: {_ in })
+            }
         }
         
         attachZoomGesturesIfNeeded()
@@ -59,19 +72,6 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
         NotificationCenter.default.removeObserver(self)
     }
     
-    private func createNativeView() {
-        let screenSize = UIScreen.main.bounds
-        let label = UILabel()
-        label.textAlignment = .center
-        label.textColor = UIColor.blue
-        label.frame = CGRect(x: 0, y: 0, width: screenSize.width, height: screenSize.height)
-        label.autoresizingMask = [.flexibleWidth, .flexibleTopMargin, .flexibleBottomMargin]
-        label.center = _view.center // Center the label within _view
-        label.textColor = UIColor.blue
-        _view.addSubview(label)
-
-    }
-
     func view() -> UIView {
         return _view
     }
@@ -82,19 +82,13 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
         switch call.method {
         case "getCameraPermission":
             self.requestCameraPermission(result: result)
-            break
-        case "initCamera":
-            break
         case "switchCamera":
             let cameraID = (myArgs?["cameraID"] as! Int)
             self.switchCamera(cameraID: cameraID, result: result)
-            break
         case "pauseCamera":
             self.pauseCamera(result: result)
-            break
         case "resumeCamera":
             self.resumeCamera(result: result)
-            break
         case "setZoom":
               if let z = myArgs?["zoom"] as? Double {
                   self.setZoom(factor: CGFloat(z), animated: true)
@@ -113,46 +107,36 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
     func requestCameraPermission(result:  @escaping FlutterResult) {
         if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
             UIApplication.shared.open(settingsURL)
-            print(settingsURL)
             result(true)
         }
     }
 
     func setupAVCapture() {
-        captureSession.sessionPreset = AVCaptureSession.Preset.high
+        captureSession.sessionPreset = .high
         captureDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
     }
 
     private func setupCamera() {
-        print("Setting up the camera...")
-
-        // Initialize the capture device
-        captureDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
-        lastZoomFactor = 1.0
-
-        if captureDevice == nil {
+        guard let captureDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
             print("Error: captureDevice is nil.")
             return
         }
-        print("captureDevice initialized: \(captureDevice!)")
+        self.captureDevice = captureDevice
+        lastZoomFactor = 1.0
 
-        // Configure camera input
-        let videoInput: AVCaptureDeviceInput
         do {
-            videoInput = try AVCaptureDeviceInput(device: captureDevice)
+            let videoInput = try AVCaptureDeviceInput(device: captureDevice)
+            if captureSession.canAddInput(videoInput) {
+                captureSession.addInput(videoInput)
+            } else {
+                print("Could not add video input to session")
+                return
+            }
         } catch {
             print("Failed to set up camera input: \(error)")
             return
         }
 
-        if captureSession.canAddInput(videoInput) {
-            captureSession.addInput(videoInput)
-        } else {
-            print("Could not add video input to session")
-            return
-        }
-
-        // Configure video output
         let videoOutput = AVCaptureVideoDataOutput()
         videoOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "videoQueue"))
         if captureSession.canAddOutput(videoOutput) {
@@ -162,7 +146,6 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
             return
         }
 
-        // Preview layer will be handled by ensurePreviewLayer
         ensurePreviewLayer()
         startSession()
     }
@@ -208,13 +191,9 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
     func switchCamera(cameraID: Int, result: @escaping FlutterResult) {
         captureSession.stopRunning()
         self.cameraID = cameraID
-        captureDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: cameraID == 0 ? .back : .front)
-        
-        // Remove existing inputs/outputs to reset
         for input in captureSession.inputs { captureSession.removeInput(input) }
         for output in captureSession.outputs { captureSession.removeOutput(output) }
-        
-        setupCamera() // re-setup
+        setupCamera()
         result(true)
     }
 
@@ -229,54 +208,27 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-
+        guard CMSampleBufferGetImageBuffer(sampleBuffer) != nil else { return }
         let visionImage = VisionImage(buffer: sampleBuffer)
         visionImage.orientation = imageOrientation()
 
         textRecognizer.process(visionImage) { result, error in
-            guard error == nil, let result = result else {
-                // print("Error recognizing text: \(String(describing: error))")
-                return
+            guard error == nil, let result = result, !result.text.isEmpty else { return }
+            
+            let lines = result.blocks.flatMap { $0.lines }.map {
+                LineModel(text: $0.text, cornerPoints: $0.cornerPoints.map { CornerPointModel(point: $0.cgPointValue) })
             }
-
-            if(result.text != "") {
-                var listLineModel: [LineModel] = []
-
-                for b in result.blocks {
-                    for l in b.lines{
-                        let lineModel : LineModel = LineModel()
-                        lineModel.text = l.text
-
-                        for c in l.cornerPoints {
-                            lineModel.cornerPoints.append(CornerPointModel(x: c.cgPointValue.x, y: c.cgPointValue.y))
-                        }
-
-                        listLineModel.append(lineModel)
-                    }
-                }
-
-                self.onTextRead(text: result.text, values: listLineModel, path: "", orientation:  visionImage.orientation.rawValue)
-
-            } else {
-
-                self.onTextRead(text: "", values: [], path: "", orientation:  nil)
-            }
+            self.onTextRead(text: result.text, values: lines, path: nil, orientation: visionImage.orientation.rawValue)
         }
     }
 
     private func imageOrientation() -> UIImage.Orientation {
         switch UIDevice.current.orientation {
-        case .portrait:
-            return .right
-        case .landscapeLeft:
-            return .up
-        case .landscapeRight:
-            return .down
-        case .portraitUpsideDown:
-            return .left
-        default:
-            return .right
+        case .portrait: return .right
+        case .landscapeLeft: return .up
+        case .landscapeRight: return .down
+        case .portraitUpsideDown: return .left
+        default: return .right
         }
     }
 
@@ -284,70 +236,30 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
         captureSession.stopRunning()
     }
 
-
     func onTextRead(text: String, values: [LineModel], path: String?, orientation: Int?) {
         let data = OcrData(text: text, path: path, orientation: orientation, lines: values)
-        let jsonEncoder = JSONEncoder()
-        guard let jsonData = try? jsonEncoder.encode(data) else { return }
-        let json = String(data: jsonData, encoding: String.Encoding.utf8)
-
-        // 🔐 Ensure channel call is always on the main thread
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.channel?.invokeMethod("onTextRead", arguments: json)
+        guard let json = try? JSONEncoder().encode(data), let jsonString = String(data: json, encoding: .utf8) else { return }
+        DispatchQueue.main.async {
+            self.channel?.invokeMethod("onTextRead", arguments: jsonString)
         }
     }
-
 
     private func attachZoomGesturesIfNeeded() {
         guard _view.gestureRecognizers?.isEmpty ?? true else { return }
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
         _view.addGestureRecognizer(pinch)
-
-        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTapResetZoom))
-        doubleTap.numberOfTapsRequired = 2
-        _view.addGestureRecognizer(doubleTap)
     }
 
     @objc private func handlePinch(_ pinch: UIPinchGestureRecognizer) {
         guard let device = self.captureDevice else { return }
-        switch pinch.state {
-        case .began:
-            lastZoomFactor = device.videoZoomFactor
-        case .changed:
-            // Compute new factor from the pinch scale
-            var newFactor = lastZoomFactor * pinch.scale
-            newFactor = max(minZoomFactor, min(newFactor, maxZoomFactor))
-            do {
-                try device.lockForConfiguration()
-                device.videoZoomFactor = newFactor
-                device.unlockForConfiguration()
-            } catch {
-                print("Zoom lock error: \(error)")
-            }
-        case .ended, .cancelled, .failed:
-            // Optionally smooth to a clamped value at the end
-            let target = max(minZoomFactor, min(device.videoZoomFactor, maxZoomFactor))
-            do {
-                try device.lockForConfiguration()
-                if device.responds(to: #selector(setter: AVCaptureDevice.videoZoomFactor)) {
-                    // Smooth ramp (0.2s approx) if supported
-                    device.ramp(toVideoZoomFactor: target, withRate: 8.0)
-                } else {
-                    device.videoZoomFactor = target
-                }
-                device.unlockForConfiguration()
-            } catch {
-                print("Zoom end lock error: \(error)")
-            }
-            lastZoomFactor = target
-        default:
-            break
-        }
-    }
-
-    @objc private func handleDoubleTapResetZoom() {
-        setZoom(factor: 1.0, animated: true)
+        if pinch.state == .began { lastZoomFactor = device.videoZoomFactor }
+        var newFactor = lastZoomFactor * pinch.scale
+        newFactor = max(minZoomFactor, min(newFactor, maxZoomFactor))
+        do {
+            try device.lockForConfiguration()
+            device.videoZoomFactor = newFactor
+            device.unlockForConfiguration()
+        } catch { print("Zoom lock error: \(error)") }
     }
 
     private func setZoom(factor: CGFloat, animated: Bool = true) {
@@ -355,21 +267,24 @@ class CameraKitOcrPlusView: NSObject, FlutterPlatformView, AVCaptureVideoDataOut
         let clamped = max(minZoomFactor, min(factor, maxZoomFactor))
         do {
             try device.lockForConfiguration()
-            if animated {
-                device.ramp(toVideoZoomFactor: clamped, withRate: 8.0)
-            } else {
-                device.videoZoomFactor = clamped
-            }
+            if animated { device.ramp(toVideoZoomFactor: clamped, withRate: 8.0) } else { device.videoZoomFactor = clamped }
             device.unlockForConfiguration()
             lastZoomFactor = clamped
-
-            // 🔐 Ensure channel call is always on the main thread
-            DispatchQueue.main.async { [weak self] in
-                self?.channel?.invokeMethod("onZoomChanged", arguments: factor)
+            DispatchQueue.main.async {
+                self.channel?.invokeMethod("onZoomChanged", arguments: factor)
             }
-
-        } catch {
-            print("setZoom error: \(error)")
-        }
+        } catch { print("setZoom error: \(error)") }
     }
+}
+
+struct OcrData: Codable {
+    var text: String
+    var path: String?
+    var orientation: Int?
+    var lines: [LineModel]
+}
+
+struct LineModel: Codable {
+    var text: String
+    var cornerPoints: [CornerPointModel]
 }
