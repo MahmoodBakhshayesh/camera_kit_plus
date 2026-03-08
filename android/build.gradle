@@ -2,14 +2,14 @@ group = "com.abomis.camera_kit_plus"
 version = "1.0-SNAPSHOT"
 
 buildscript {
-    ext.kotlin_version = "1.8.10"
+    ext.kotlin_version = "2.1.0"
     repositories {
         google()
         mavenCentral()
     }
 
     dependencies {
-        classpath("com.android.tools.build:gradle:7.3.0")
+        classpath("com.android.tools.build:gradle:8.6.0")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
     }
 }
@@ -29,7 +29,7 @@ android {
         namespace = "com.abomis.camera_kit_plus"
     }
 
-    compileSdk = 34
+    compileSdk = 35
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
@@ -48,6 +48,15 @@ android {
     defaultConfig {
         minSdk = 21
         consumerProguardFiles 'proguard-rules.pro'
+    }
+
+    // Required for 16 KB page size support (Google Play requirement from Nov 2025)
+    // AGP 8.5.1+ handles 16 KB zip alignment for uncompressed .so files automatically.
+    // useLegacyPackaging = false ensures .so files are stored uncompressed and aligned.
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = false
+        }
     }
 
     dependencies {
