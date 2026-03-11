@@ -173,7 +173,12 @@ class _CameraKitOcrPlusViewState extends State<CameraKitOcrPlusView> with Widget
 }
 
 class OcrData {
-  OcrData({required this.text, this.path = "", this.orientation = 0, required this.lines});
+  OcrData({
+    required this.text,
+    this.path = "",
+    this.orientation = 0,
+    required this.lines,
+  });
 
   String text;
   String path;
@@ -181,33 +186,57 @@ class OcrData {
   List<OcrLine> lines;
 
   factory OcrData.fromJson(Map<String, dynamic> json) => OcrData(
-        text: json["text"],
-        path: json["path"] ?? "",
-        orientation: json["orientation"] ?? 0,
-        lines: List<OcrLine>.from((json["lines"] ?? []).map((x) => OcrLine.fromJson(x))),
-      );
+    text: json["text"],
+    path: json["path"] ?? "",
+    orientation: json["orientation"] ?? 0,
+    lines: List<OcrLine>.from((json["lines"] ?? []).map((x) => OcrLine.fromJson(x))),
+  );
+
+  Map<String, dynamic> toJson() => {
+    "text": text,
+    "path": path,
+    "orientation": orientation,
+    "lines": List<dynamic>.from(lines.map((x) => x.toJson())),
+  };
 }
 
 class OcrLine {
-  OcrLine({required this.text, required this.cornerPoints});
+  OcrLine({
+    required this.text,
+    required this.cornerPoints,
+  });
 
   String text;
   List<OcrPoint> cornerPoints;
 
   factory OcrLine.fromJson(Map<String, dynamic> json) => OcrLine(
-        text: json["text"] ?? "",
-        cornerPoints: List<OcrPoint>.from((json["cornerPoints"] ?? []).map((x) => OcrPoint.fromJson(x))),
-      );
+    text: json["text"] ?? json["a"] ?? "",
+    cornerPoints: List<OcrPoint>.from((json["cornerPoints"] ?? json["b"] ?? []).map((x) => OcrPoint.fromJson(x))),
+  );
+
+  Map<String, dynamic> toJson() => {
+    "text": text,
+    "cornerPoints": List<dynamic>.from(cornerPoints.map((x) => x.toJson())),
+  };
 }
 
 class OcrPoint {
-  OcrPoint({required this.x, required this.y});
+  OcrPoint({
+    required this.x,
+    required this.y,
+  });
 
   double x;
   double y;
 
   factory OcrPoint.fromJson(Map<String, dynamic> json) => OcrPoint(
-        x: (json["x"]).toDouble(),
-        y: (json["y"]).toDouble(),
-      );
+    x: (json["x"] ?? json["a"]).toDouble(),
+    y: (json["y"] ?? json["b"]).toDouble(),
+  );
+
+  Map<String, dynamic> toJson() => {
+    "x": x,
+    "y": y,
+  };
 }
+
