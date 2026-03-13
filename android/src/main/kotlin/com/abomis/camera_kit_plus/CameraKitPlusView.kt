@@ -39,10 +39,12 @@ import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry
+import io.flutter.plugin.platform.PlatformView
 import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
+@RequiresApi(Build.VERSION_CODES.N)
 class CameraKitPlusView(
     context: Context,
     messenger: BinaryMessenger,
@@ -312,7 +314,11 @@ class CameraKitPlusView(
     @OptIn(ExperimentalCamera2Interop::class)
     private fun buildMacroStatus(): Map<String, Any?> {
         val cam = camera ?: return emptyMap()
-        val c2 = try { Camera2CameraInfo.from(cam.cameraInfo) } catch (_: Throwable) { null }
+        val c2 = try {
+            Camera2CameraInfo.from(cam.cameraInfo)
+        } catch (_: Throwable) {
+            null
+        }
         return mapOf(
             "requestedMacro" to macroEnabled,
             "macroSupported" to (macroSupported ?: isMacroSupported(cam)),
@@ -366,7 +372,10 @@ class CameraKitPlusView(
 
     private fun pauseCamera(result: MethodChannel.Result?) {
         cameraProvider?.unbindAll()
-        try { barcodeScanner.close() } catch (_: Throwable) {}
+        try {
+            barcodeScanner.close()
+        } catch (_: Throwable) {
+        }
         result?.success(true)
     }
 
