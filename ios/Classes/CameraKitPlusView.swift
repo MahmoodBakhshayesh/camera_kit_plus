@@ -106,26 +106,6 @@ class CameraKitPlusView: NSObject,
                                                selector: #selector(handleDeviceOrientationChange),
                                                name: UIDevice.orientationDidChangeNotification,
                                                object: nil)
-                                               
-        NotificationCenter.default.addObserver(self, 
-                                               selector: #selector(sessionWasInterrupted),
-                                               name: .AVCaptureSessionWasInterrupted,
-                                               object: captureSession)
-        
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(sessionInterruptionEnded),
-                                               name: .AVCaptureSessionInterruptionEnded,
-                                               object: captureSession)
-                                               
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(appWillResignActive),
-                                               name: UIApplication.willResignActiveNotification,
-                                               object: nil)
-        
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(appDidBecomeActive),
-                                               name: UIApplication.didBecomeActiveNotification,
-                                               object: nil)
     }
 
     deinit {
@@ -133,27 +113,6 @@ class CameraKitPlusView: NSObject,
     }
 
     func view() -> UIView { _view }
-    
-    // MARK: - Lifecycle Handlers
-    @objc func appWillResignActive() {
-        pauseCamera(result: { _ in })
-    }
-
-    @objc func appDidBecomeActive() {
-        resumeCamera(result: { _ in })
-    }
-    
-    @objc func sessionWasInterrupted(notification: Notification) {
-        print("AVCaptureSession was interrupted.")
-    }
-
-    @objc func sessionInterruptionEnded(notification: Notification) {
-        print("AVCaptureSession interruption ended.")
-        visionQueue.async { [weak self] in
-            self?.captureSession.startRunning()
-        }
-    }
-
 
     // MARK: - Flutter Methods
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -390,8 +349,16 @@ class CameraKitPlusView: NSObject,
 
     // MARK: - Session control
     private func startSession() {
-        visionQueue.async { [weak self] in
-            guard let self = self else { return }
+        DispatchQueue.main.async {
+            guard self._view.bounds.width > 0, self._view.bounds.height > 0 else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.startSession() }
+                return
+            }
+            if !self.permissionGranted() {
+                self.addButtonToView()
+                return
+            }
+            self.ensurePreviewLayer()
             if !self.captureSession.isRunning {
                 self.captureSession.startRunning()
             }
@@ -399,23 +366,13 @@ class CameraKitPlusView: NSObject,
     }
 
     func pauseCamera(result: @escaping FlutterResult) {
-        visionQueue.async { [weak self] in
-            guard let self = self else { return }
-            if self.captureSession.isRunning {
-                self.captureSession.stopRunning()
-            }
-            result(true)
-        }
+        captureSession.stopRunning()
+        result(true)
     }
 
     func resumeCamera(result: @escaping FlutterResult) {
-        visionQueue.async { [weak self] in
-            guard let self = self else { return }
-            if !self.captureSession.isRunning {
-                self.captureSession.startRunning()
-            }
-            result(true)
-        }
+        if !captureSession.isRunning { captureSession.startRunning() }
+        result(true)
     }
 
     // MARK: - Photo

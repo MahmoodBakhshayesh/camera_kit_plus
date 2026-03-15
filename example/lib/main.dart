@@ -109,7 +109,7 @@ class Home extends StatelessWidget {
                         },
                         controller: controller,
                         onTextRead: (OcrData data) {
-                          // log(data.text);
+                          log(data.text);
                         },
                       ),
                     ],
